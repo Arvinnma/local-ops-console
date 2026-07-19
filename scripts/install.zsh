@@ -25,7 +25,7 @@ if [[ ! -x "$BREW_PREFIX/bin/node" ]]; then
   brew install node
 fi
 
-command mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/config" "$INSTALL_DIR/generated" "$INSTALL_DIR/runtime" "$HOME/Library/LaunchAgents"
+command mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/bin" "$INSTALL_DIR/config" "$INSTALL_DIR/generated" "$INSTALL_DIR/runtime" "$HOME/Library/LaunchAgents"
 
 /usr/bin/rsync -a \
   --exclude '.git/' \
@@ -47,7 +47,10 @@ if [[ ! -f "$INSTALL_DIR/config/process-compose.token" ]]; then
 fi
 
 command chmod 700 "$INSTALL_DIR/scripts/start-stack.zsh" "$INSTALL_DIR/scripts/opsctl.zsh"
+command chmod 700 "$INSTALL_DIR/scripts/local-ops-ssh-askpass.zsh"
 command chmod 600 "$INSTALL_DIR/config/catalog.json" "$INSTALL_DIR/config/process-compose.token"
+
+"$INSTALL_DIR/scripts/build-keychain-helper.zsh" "$INSTALL_DIR/bin/local-ops-keychain"
 
 "$BREW_PREFIX/bin/node" "$INSTALL_DIR/scripts/render-config.mjs"
 

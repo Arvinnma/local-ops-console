@@ -1,6 +1,7 @@
 .DS_Store
 *.log
 node_modules/
+bin/
 
 # 环境变量、证书与私钥
 .env
@@ -14,6 +15,7 @@ node_modules/
 # 本机配置和密钥
 config/catalog.json
 config/process-compose.token
+config/last-session.json
 
 # 运行时和自动生成配置
 runtime/*

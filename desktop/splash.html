@@ -3,17 +3,18 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self' data:">
-    <title>正在启动 Local Ops</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self' data:; script-src 'self'">
+    <title data-en="Starting Local Ops">正在启动 Local Ops</title>
     <link rel="stylesheet" href="shell.css">
+    <script src="shell-localize.js" defer></script>
   </head>
   <body>
     <main class="shell-card">
-      <div class="app-glyph" aria-hidden="true"><span></span><span></span><span></span></div>
+      <img class="app-glyph logo" src="assets/local-ops-app-icon.svg" alt="" aria-hidden="true">
       <p class="eyebrow">LOCAL CONTROL PLANE</p>
-      <h1>正在准备本机控制台</h1>
-      <p class="detail">首次启动会自动安装后台组件，之后将直接连接本机服务…</p>
-      <div class="loader" aria-label="正在加载"><span></span></div>
+      <h1 data-en="Preparing the Local Control Plane">正在准备本机控制台</h1>
+      <p class="detail" data-en="On first launch, Local Ops installs its background components and then connects directly to local services…">首次启动会自动安装后台组件，之后将直接连接本机服务…</p>
+      <div class="loader" aria-label="正在加载" data-en-aria="Loading"><span></span></div>
     </main>
   </body>
 </html>

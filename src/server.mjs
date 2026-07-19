@@ -10,10 +10,12 @@ import {
   CADDYFILE_PATH,
   PROCESS_COMPOSE_PATH,
   ROOT,
+  SSH_ASKPASS_PATH,
   SYSTEM_PROCESS_DEFINITIONS,
   TOKEN_PATH,
   WORKER_COMPOSE_PATH,
   applyPortableConfigImport,
+  buildTerminalAppleScript,
   createPortableConfigExport,
   loadCatalog,
   normalizeRoute,
@@ -24,19 +26,29 @@ import {
   portableConfigCounts,
   publicProxyPort,
   renderAll,
+  renderSshCommand,
   routeUrl,
   saveCatalog,
   validateCatalog
 } from "./config.mjs";
+import {
+  deletePrivateKeyPassphrase,
+  hasPrivateKeyPassphrase,
+  normalizePrivateKeyPassphrase,
+  readPrivateKeyPassphrase,
+  storePrivateKeyPassphrase
+} from "./keychain.mjs";
 
 const execFileAsync = promisify(execFile);
 const PUBLIC_DIR = path.join(ROOT, "public");
+const LAST_SESSION_PATH = path.join(ROOT, "config", "last-session.json");
 const CSRF_TOKEN = crypto.randomBytes(32).toString("hex");
 const CONTENT_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml; charset=utf-8",
   ".png": "image/png",
   ".webp": "image/webp",
   ".ico": "image/x-icon"
@@ -45,6 +57,7 @@ const CONTENT_TYPES = {
 let mutationQueue = Promise.resolve();
 let stateCache = { at: 0, value: null };
 let dockerCache = { at: 0, value: null };
+let sessionCapturePromise = null;
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -90,6 +103,7 @@ const server = http.createServer(async (request, response) => {
       if (definition.protected && action !== "restart") {
         throw httpError(403, "控制台自身不能从网页停止");
       }
+      if (definition.kind === "tunnel" && action !== "stop") await assertPassphraseAvailable(definition);
       await processAction(catalog, id, action);
       invalidateState();
       return sendJson(response, 200, { ok: true, id, action });
@@ -119,21 +133,36 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { ok: true, ...(await applyAppStartupActions(catalog)) });
     }
 
+    if (request.method === "POST" && url.pathname === "/api/session/capture") {
+      const snapshot = await captureLastSessionState(catalog);
+      return sendJson(response, 200, {
+        ok: true,
+        capturedAt: snapshot.capturedAt,
+        services: snapshot.services.length,
+        tunnels: snapshot.tunnels.length,
+        docker: snapshot.docker.containers.length
+      });
+    }
+
     if (request.method === "POST" && url.pathname === "/api/config/import") {
       const body = await readJson(request, 2 * 1024 * 1024);
+      const previousSecretReferences = sshPassphraseReferences(catalog);
       let imported;
       await enqueueMutation((next) => {
-        imported = applyPortableConfigImport(body, next);
+        imported = validateInput(() => applyPortableConfigImport(body, next));
         for (const key of Object.keys(next)) delete next[key];
         Object.assign(next, imported);
       });
+      const retainedSecretReferences = sshPassphraseReferences(imported);
+      for (const reference of previousSecretReferences) {
+        if (!retainedSecretReferences.has(reference)) await cleanupPassphrase(reference);
+      }
       return sendJson(response, 200, {
         ok: true,
         counts: portableConfigCounts(imported),
         settings: {
           launchAppAtLogin: imported.settings.launchAppAtLogin,
-          startServicesOnAppLaunch: imported.settings.startServicesOnAppLaunch,
-          startTunnelsOnAppLaunch: imported.settings.startTunnelsOnAppLaunch,
+          restoreLastSessionOnAppLaunch: imported.settings.restoreLastSessionOnAppLaunch,
           language: imported.settings.language
         }
       });
@@ -141,7 +170,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/services") {
       const body = await readJson(request);
-      const service = normalizeService(body);
+      const service = validateInput(() => normalizeService(body));
       await enqueueMutation((next) => {
         if (next.services.some((item) => item.id === service.id) || next.tunnels.some((item) => item.id === service.id)) {
           throw httpError(409, `ID 已存在：${service.id}`);
@@ -168,7 +197,8 @@ const server = http.createServer(async (request, response) => {
     const serviceMatch = /^\/api\/services\/([^/]+)$/.exec(url.pathname);
     if (request.method === "PUT" && serviceMatch) {
       const id = decodeURIComponent(serviceMatch[1]);
-      const service = normalizeService({ ...(await readJson(request)), id });
+      const body = await readJson(request);
+      const service = validateInput(() => normalizeService({ ...body, id }));
       await enqueueMutation((next) => {
         const index = next.services.findIndex((item) => item.id === id);
         if (index < 0) throw httpError(404, "没有找到该服务");
@@ -189,46 +219,69 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/tunnels") {
-      const tunnel = normalizeTunnel(await readJson(request));
-      await enqueueMutation((next) => {
-        if (next.services.some((item) => item.id === tunnel.id) || next.tunnels.some((item) => item.id === tunnel.id)) {
-          throw httpError(409, `ID 已存在：${tunnel.id}`);
-        }
-        if (next.tunnels.some((item) => item.localPort === tunnel.localPort)) {
-          throw httpError(409, `本地端口 ${tunnel.localPort} 已被其他隧道使用`);
-        }
-        next.tunnels.push(tunnel);
-      });
-      return sendJson(response, 201, { ok: true, tunnel });
+      const body = await readJson(request);
+      const baseTunnel = validateInput(() => normalizeTunnel(body));
+      const secret = await preparePassphraseChange(body, null, baseTunnel.identityFile, true);
+      const tunnel = validateInput(() => normalizeTunnel({ ...body, passphraseRef: secret.reference }));
+      try {
+        await enqueueMutation((next) => {
+          if (next.services.some((item) => item.id === tunnel.id) || next.tunnels.some((item) => item.id === tunnel.id)) {
+            throw httpError(409, `ID 已存在：${tunnel.id}`);
+          }
+          if (next.tunnels.some((item) => item.localPort === tunnel.localPort)) {
+            throw httpError(409, `本地端口 ${tunnel.localPort} 已被其他隧道使用`);
+          }
+          next.tunnels.push(tunnel);
+        });
+        await secret.commit();
+      } catch (error) {
+        await secret.rollback();
+        throw error;
+      }
+      return sendJson(response, 201, { ok: true, tunnel: publicSshResource(tunnel) });
     }
 
     const tunnelMatch = /^\/api\/tunnels\/([^/]+)$/.exec(url.pathname);
     if (request.method === "PUT" && tunnelMatch) {
       const id = decodeURIComponent(tunnelMatch[1]);
-      const tunnel = normalizeTunnel({ ...(await readJson(request)), id });
-      await enqueueMutation((next) => {
-        const index = next.tunnels.findIndex((item) => item.id === id);
-        if (index < 0) throw httpError(404, "没有找到该隧道");
-        if (next.tunnels.some((item) => item.id !== id && item.localPort === tunnel.localPort)) {
-          throw httpError(409, `本地端口 ${tunnel.localPort} 已被其他隧道使用`);
-        }
-        next.tunnels[index] = tunnel;
-      });
-      return sendJson(response, 200, { ok: true, tunnel });
+      const existing = catalog.tunnels.find((item) => item.id === id);
+      if (!existing) throw httpError(404, "没有找到该隧道");
+      const body = await readJson(request);
+      const baseTunnel = validateInput(() => normalizeTunnel({ ...body, id, passphraseRef: existing.passphraseRef }));
+      const secret = await preparePassphraseChange(body, existing.passphraseRef, baseTunnel.identityFile, true);
+      const tunnel = validateInput(() => normalizeTunnel({ ...body, id, passphraseRef: secret.reference }));
+      try {
+        await enqueueMutation((next) => {
+          const index = next.tunnels.findIndex((item) => item.id === id);
+          if (index < 0) throw httpError(404, "没有找到该隧道");
+          if (next.tunnels.some((item) => item.id !== id && item.localPort === tunnel.localPort)) {
+            throw httpError(409, `本地端口 ${tunnel.localPort} 已被其他隧道使用`);
+          }
+          next.tunnels[index] = tunnel;
+        });
+        await secret.commit();
+      } catch (error) {
+        await secret.rollback();
+        throw error;
+      }
+      return sendJson(response, 200, { ok: true, tunnel: publicSshResource(tunnel) });
     }
 
     if (request.method === "DELETE" && tunnelMatch) {
       const id = decodeURIComponent(tunnelMatch[1]);
+      const removed = catalog.tunnels.find((item) => item.id === id);
       await enqueueMutation((next) => {
         const count = next.tunnels.length;
         next.tunnels = next.tunnels.filter((item) => item.id !== id);
         if (count === next.tunnels.length) throw httpError(404, "没有找到该隧道");
       });
+      await cleanupPassphrase(removed?.passphraseRef);
       return sendJson(response, 200, { ok: true, id });
     }
 
     if (request.method === "POST" && url.pathname === "/api/routes") {
-      const route = normalizeRoute(await readJson(request));
+      const body = await readJson(request);
+      const route = validateInput(() => normalizeRoute(body));
       await enqueueMutation((next) => {
         if (next.routes.some((item) => item.id === route.id || item.host === route.host)) {
           throw httpError(409, "域名或域名 ID 已存在");
@@ -241,7 +294,8 @@ const server = http.createServer(async (request, response) => {
     const routeMatch = /^\/api\/routes\/([^/]+)$/.exec(url.pathname);
     if (request.method === "PUT" && routeMatch) {
       const id = decodeURIComponent(routeMatch[1]);
-      const route = normalizeRoute({ ...(await readJson(request)), id });
+      const body = await readJson(request);
+      const route = validateInput(() => normalizeRoute({ ...body, id }));
       await enqueueMutation((next) => {
         const index = next.routes.findIndex((item) => item.id === id);
         if (index < 0) throw httpError(404, "没有找到该域名");
@@ -266,12 +320,21 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/terminal-tasks") {
-      const task = normalizeTerminalTask(await readJson(request));
-      await enqueueMutation((next) => {
-        if (next.terminalTasks.some((item) => item.id === task.id)) throw httpError(409, `ID 已存在：${task.id}`);
-        next.terminalTasks.push(task);
-      });
-      return sendJson(response, 201, { ok: true, task });
+      const body = await readJson(request);
+      const baseTask = validateInput(() => normalizeTerminalTask(body));
+      const secret = await preparePassphraseChange(body, null, baseTask.identityFile, baseTask.kind === "ssh");
+      const task = validateInput(() => normalizeTerminalTask({ ...body, passphraseRef: secret.reference }));
+      try {
+        await enqueueMutation((next) => {
+          if (next.terminalTasks.some((item) => item.id === task.id)) throw httpError(409, `ID 已存在：${task.id}`);
+          next.terminalTasks.push(task);
+        });
+        await secret.commit();
+      } catch (error) {
+        await secret.rollback();
+        throw error;
+      }
+      return sendJson(response, 201, { ok: true, task: publicSshResource(task) });
     }
 
     const terminalRunMatch = /^\/api\/terminal-tasks\/([^/]+)\/run$/.exec(url.pathname);
@@ -279,6 +342,7 @@ const server = http.createServer(async (request, response) => {
       const id = decodeURIComponent(terminalRunMatch[1]);
       const task = catalog.terminalTasks.find((item) => item.id === id);
       if (!task) throw httpError(404, "没有找到该终端任务");
+      await assertPassphraseAvailable(task);
       await launchTerminalTask(task);
       return sendJson(response, 200, { ok: true, id });
     }
@@ -286,21 +350,34 @@ const server = http.createServer(async (request, response) => {
     const terminalMatch = /^\/api\/terminal-tasks\/([^/]+)$/.exec(url.pathname);
     if (request.method === "PUT" && terminalMatch) {
       const id = decodeURIComponent(terminalMatch[1]);
-      const task = normalizeTerminalTask({ ...(await readJson(request)), id });
-      await enqueueMutation((next) => {
-        const index = next.terminalTasks.findIndex((item) => item.id === id);
-        if (index < 0) throw httpError(404, "没有找到该终端任务");
-        next.terminalTasks[index] = task;
-      });
-      return sendJson(response, 200, { ok: true, task });
+      const existing = catalog.terminalTasks.find((item) => item.id === id);
+      if (!existing) throw httpError(404, "没有找到该终端任务");
+      const body = await readJson(request);
+      const baseTask = validateInput(() => normalizeTerminalTask({ ...body, id, passphraseRef: existing.passphraseRef }));
+      const secret = await preparePassphraseChange(body, existing.passphraseRef, baseTask.identityFile, baseTask.kind === "ssh");
+      const task = validateInput(() => normalizeTerminalTask({ ...body, id, passphraseRef: secret.reference }));
+      try {
+        await enqueueMutation((next) => {
+          const index = next.terminalTasks.findIndex((item) => item.id === id);
+          if (index < 0) throw httpError(404, "没有找到该终端任务");
+          next.terminalTasks[index] = task;
+        });
+        await secret.commit();
+      } catch (error) {
+        await secret.rollback();
+        throw error;
+      }
+      return sendJson(response, 200, { ok: true, task: publicSshResource(task) });
     }
     if (request.method === "DELETE" && terminalMatch) {
       const id = decodeURIComponent(terminalMatch[1]);
+      const removed = catalog.terminalTasks.find((item) => item.id === id);
       await enqueueMutation((next) => {
         const count = next.terminalTasks.length;
         next.terminalTasks = next.terminalTasks.filter((item) => item.id !== id);
         if (count === next.terminalTasks.length) throw httpError(404, "没有找到该终端任务");
       });
+      await cleanupPassphrase(removed?.passphraseRef);
       return sendJson(response, 200, { ok: true, id });
     }
 
@@ -315,7 +392,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "PATCH" && url.pathname === "/api/settings") {
       const body = await readJson(request);
       await enqueueMutation((next) => {
-        for (const key of ["launchAppAtLogin", "startServicesOnAppLaunch", "startTunnelsOnAppLaunch", "startDockerOnAppLaunch"]) {
+        for (const key of ["launchAppAtLogin", "restoreLastSessionOnAppLaunch"]) {
           if (key in body) next.settings[key] = Boolean(body[key]);
         }
         if ("language" in body) {
@@ -520,7 +597,7 @@ async function startAllDockerContainers() {
   return { started: candidates.length, total: docker.containers.length };
 }
 
-async function startDockerDesktopAndContainers() {
+async function ensureDockerEngine() {
   let docker = await getDockerState(true);
   if (!docker.available) throw httpError(503, "没有找到 Docker CLI");
 
@@ -541,18 +618,38 @@ async function startDockerDesktopAndContainers() {
     }
   }
 
-  const candidates = docker.containers.filter((item) => !item.running);
+  return { docker, desktopStarted };
+}
+
+async function startRememberedDockerContainers(references) {
+  if (!references.length) return { started: 0, total: 0, desktopStarted: false, missing: [] };
+  const { docker, desktopStarted } = await ensureDockerEngine();
+  const matched = docker.containers.filter((container) => references.some((reference) => dockerReferenceMatches(reference, container)));
+  const candidates = matched.filter((item) => !item.running);
+
   if (candidates.length) await runDocker(["start", ...candidates.map((item) => item.id)], 60000);
   invalidateDocker();
-  return { started: candidates.length, total: docker.containers.length, desktopStarted };
+  const missing = references
+    .filter((reference) => !docker.containers.some((container) => dockerReferenceMatches(reference, container)))
+    .map((reference) => reference.name || reference.id)
+    .filter(Boolean);
+  return { started: candidates.length, total: references.length, desktopStarted, missing };
 }
 
 async function applyAppStartupActions(catalog) {
+  if (!catalog.settings.restoreLastSessionOnAppLaunch) {
+    return { restored: false, services: 0, tunnels: 0, docker: 0, dockerDesktop: false, errors: [] };
+  }
+
+  const remembered = loadLastSessionState();
   const current = await getState(catalog, true);
   const processMap = new Map(current.processes.map((item) => [item.id, item]));
-  const targets = [];
-  if (catalog.settings.startServicesOnAppLaunch) targets.push(...catalog.services);
-  if (catalog.settings.startTunnelsOnAppLaunch) targets.push(...catalog.tunnels);
+  const rememberedServiceIds = new Set(remembered.services);
+  const rememberedTunnelIds = new Set(remembered.tunnels);
+  const targets = [
+    ...catalog.services.filter((item) => rememberedServiceIds.has(item.id)),
+    ...catalog.tunnels.filter((item) => rememberedTunnelIds.has(item.id))
+  ];
   const errors = [];
   let services = 0;
   let tunnels = 0;
@@ -568,16 +665,127 @@ async function applyAppStartupActions(catalog) {
   }
   let docker = 0;
   let dockerDesktop = false;
-  if (catalog.settings.startDockerOnAppLaunch) {
+  if (remembered.docker.containers.length) {
     try {
-      const result = await startDockerDesktopAndContainers();
+      const result = await startRememberedDockerContainers(remembered.docker.containers);
       docker = result.started;
       dockerDesktop = result.desktopStarted;
+      if (result.missing.length) errors.push(`Docker：未找到 ${result.missing.join("、")}`);
     }
     catch (error) { errors.push(`Docker：${cleanError(error)}`); }
   }
   invalidateState();
-  return { services, tunnels, docker, dockerDesktop, errors };
+  return { restored: true, services, tunnels, docker, dockerDesktop, errors };
+}
+
+function captureLastSessionState(catalog) {
+  if (sessionCapturePromise) return sessionCapturePromise;
+  sessionCapturePromise = (async () => {
+    const previous = loadLastSessionState();
+    const [state, docker] = await Promise.all([
+      getState(catalog, true),
+      getDockerState(true)
+    ]);
+    const processMap = new Map(state.processes.map((item) => [item.id, item]));
+    const workerReadable = state.orchestrator.workerOnline !== false;
+    const services = workerReadable
+      ? catalog.services.filter((item) => processMap.get(item.id)?.status === "running").map((item) => item.id)
+      : previous.services;
+    const tunnels = workerReadable
+      ? catalog.tunnels.filter((item) => processMap.get(item.id)?.status === "running").map((item) => item.id)
+      : previous.tunnels;
+    const dockerContainers = docker.available
+      ? docker.daemonOnline
+        ? docker.containers.filter((item) => item.running).map(dockerContainerReference)
+        : []
+      : previous.docker.containers;
+    const sessionState = {
+      services,
+      tunnels,
+      docker: {
+        daemonOnline: Boolean(docker.available && docker.daemonOnline),
+        containers: dockerContainers
+      }
+    };
+    const previousState = {
+      services: previous.services,
+      tunnels: previous.tunnels,
+      docker: previous.docker
+    };
+    if (previous.capturedAt && JSON.stringify(sessionState) === JSON.stringify(previousState)) return previous;
+    const snapshot = {
+      version: 1,
+      capturedAt: new Date().toISOString(),
+      ...sessionState
+    };
+    writeLastSessionState(snapshot);
+    return snapshot;
+  })().finally(() => {
+    sessionCapturePromise = null;
+  });
+  return sessionCapturePromise;
+}
+
+function loadLastSessionState() {
+  const empty = {
+    version: 1,
+    capturedAt: "",
+    services: [],
+    tunnels: [],
+    docker: { daemonOnline: false, containers: [] }
+  };
+  try {
+    const value = JSON.parse(fs.readFileSync(LAST_SESSION_PATH, "utf8"));
+    if (!value || Number(value.version) !== 1) return empty;
+    return {
+      version: 1,
+      capturedAt: typeof value.capturedAt === "string" ? value.capturedAt : "",
+      services: Array.isArray(value.services) ? value.services.map(String) : [],
+      tunnels: Array.isArray(value.tunnels) ? value.tunnels.map(String) : [],
+      docker: {
+        daemonOnline: Boolean(value.docker?.daemonOnline),
+        containers: Array.isArray(value.docker?.containers)
+          ? value.docker.containers.map(normalizeDockerReference).filter((item) => item.id || item.name)
+          : []
+      }
+    };
+  } catch {
+    return empty;
+  }
+}
+
+function writeLastSessionState(snapshot) {
+  fs.mkdirSync(path.dirname(LAST_SESSION_PATH), { recursive: true });
+  const temporary = `${LAST_SESSION_PATH}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(temporary, LAST_SESSION_PATH);
+  fs.chmodSync(LAST_SESSION_PATH, 0o600);
+}
+
+function dockerContainerReference(container) {
+  return {
+    id: String(container.id || ""),
+    name: String(container.name || ""),
+    composeProject: String(container.composeProject || ""),
+    composeService: String(container.composeService || "")
+  };
+}
+
+function normalizeDockerReference(reference) {
+  if (typeof reference === "string") return { id: reference, name: "", composeProject: "", composeService: "" };
+  return dockerContainerReference(reference || {});
+}
+
+function dockerReferenceMatches(reference, container) {
+  const normalized = normalizeDockerReference(reference);
+  if (normalized.id && normalized.id === container.id) return true;
+  if (normalized.name && normalized.name === container.name) return true;
+  return Boolean(
+    normalized.composeProject
+    && normalized.composeService
+    && normalized.composeProject === container.composeProject
+    && normalized.composeService === container.composeService
+  );
 }
 
 function normalizeProcess(definition, raw = {}) {
@@ -664,27 +872,11 @@ async function processAction(catalog, id, action) {
 
 async function launchTerminalTask(task) {
   const command = buildTerminalCommand(task);
-  let script;
   if (task.terminalApp === "iterm2") {
     const installed = ["/Applications/iTerm.app", path.join(os.homedir(), "Applications", "iTerm.app")].some((item) => fs.existsSync(item));
     if (!installed) throw httpError(400, "没有找到 iTerm2，请先安装或把该任务改为系统终端");
-    script = [
-      'tell application "iTerm2"',
-      "activate",
-      "if (count of windows) = 0 then create window with default profile",
-      "tell current session of current window",
-      `write text ${JSON.stringify(command)}`,
-      "end tell",
-      "end tell"
-    ].join("\n");
-  } else {
-    script = [
-      'tell application "Terminal"',
-      "activate",
-      `do script ${JSON.stringify(command)}`,
-      "end tell"
-    ].join("\n");
   }
+  const script = buildTerminalAppleScript(task.terminalApp, command);
   try {
     await runTool("/usr/bin/osascript", ["-e", script], 20000);
   } catch (error) {
@@ -715,9 +907,95 @@ function buildTerminalCommand(task) {
       );
     }
     args.push(`${task.sshUser}@${task.sshHost}`);
-    parts.push(args.map(shellQuote).join(" "));
+    parts.push(renderSshCommand(args, task.passphraseRef, false));
   }
   return parts.join("; ");
+}
+
+async function preparePassphraseChange(body, existingReference, identityFile, supportsPassphrase) {
+  const replacement = normalizePrivateKeyPassphrase(body.identityPassphrase);
+  const remove = Boolean(body.removeIdentityPassphrase) || !supportsPassphrase;
+  if (replacement && remove) throw httpError(400, "不能同时保存和删除 SSH 私钥口令");
+  if (replacement && !identityFile) throw httpError(400, "保存私钥口令前必须选择 SSH 私钥文件");
+
+  const previousReference = String(existingReference || "");
+  let previousSecret = null;
+  let previousSecretExists = false;
+  let reference = previousReference;
+  let storedReplacement = false;
+
+  if (replacement) {
+    reference ||= crypto.randomUUID();
+    if (previousReference && await hasPrivateKeyPassphrase(previousReference)) {
+      previousSecret = await readPrivateKeyPassphrase(previousReference);
+      previousSecretExists = true;
+    }
+    await storePrivateKeyPassphrase(reference, replacement);
+    storedReplacement = true;
+    try {
+      await verifyPrivateKeyPassphrase(identityFile, reference);
+    } catch (error) {
+      if (previousSecretExists) await storePrivateKeyPassphrase(previousReference, previousSecret);
+      else await deletePrivateKeyPassphrase(reference).catch(() => {});
+      throw error;
+    }
+  } else if (remove) {
+    reference = "";
+  }
+
+  return {
+    reference,
+    async commit() {
+      if (remove && previousReference) await cleanupPassphrase(previousReference);
+    },
+    async rollback() {
+      if (!storedReplacement) return;
+      if (previousSecretExists) await storePrivateKeyPassphrase(previousReference, previousSecret);
+      else await deletePrivateKeyPassphrase(reference).catch(() => {});
+    }
+  };
+}
+
+async function verifyPrivateKeyPassphrase(identityFile, reference) {
+  if (!fs.existsSync(identityFile)) throw httpError(400, "SSH 私钥文件不存在，请检查路径");
+  try {
+    await execFileAsync("/usr/bin/ssh-keygen", ["-y", "-f", identityFile], {
+      cwd: ROOT,
+      timeout: 15000,
+      maxBuffer: 1024 * 1024,
+      env: {
+        ...process.env,
+        SSH_ASKPASS: SSH_ASKPASS_PATH,
+        SSH_ASKPASS_REQUIRE: "force",
+        DISPLAY: "local-ops:0",
+        LC_ALL: "C",
+        LOCAL_OPS_KEYCHAIN_HELPER: BINARIES.keychain,
+        LOCAL_OPS_KEYCHAIN_ACCOUNT: reference
+      }
+    });
+  } catch (error) {
+    const detail = cleanError(error);
+    if (/incorrect passphrase|bad passphrase|load failed|invalid format/i.test(detail)) {
+      throw httpError(400, "SSH 私钥口令不正确，无法解锁所选私钥");
+    }
+    throw httpError(400, `无法验证 SSH 私钥口令：${detail || "未知错误"}`);
+  }
+}
+
+async function assertPassphraseAvailable(resource) {
+  if (!resource?.passphraseRef) return;
+  if (!await hasPrivateKeyPassphrase(resource.passphraseRef)) {
+    throw httpError(409, "该 SSH 私钥的口令在 macOS 钥匙串中不可用，请编辑资源并重新保存口令");
+  }
+}
+
+async function cleanupPassphrase(reference) {
+  if (!reference) return;
+  try {
+    await deletePrivateKeyPassphrase(reference);
+  } catch (error) {
+    console.warn(`Unable to remove obsolete SSH passphrase from Keychain: ${cleanError(error)}`);
+  }
 }
 
 function runProcessCompose(catalog, args, role = "core") {
@@ -825,12 +1103,25 @@ function publicCatalog(catalog) {
   return {
     settings: catalog.settings,
     services: catalog.services,
-    tunnels: catalog.tunnels.map((item) => ({ ...item })),
+    tunnels: catalog.tunnels.map(publicSshResource),
     externalServices: catalog.externalServices,
     routes: catalog.routes.map((route) => ({ ...route, url: routeUrl(catalog, route) })),
-    terminalTasks: catalog.terminalTasks.map((item) => ({ ...item })),
+    terminalTasks: catalog.terminalTasks.map(publicSshResource),
     systemProcesses: SYSTEM_PROCESS_DEFINITIONS
   };
+}
+
+function publicSshResource(item) {
+  const result = { ...item, hasKeyPassphrase: Boolean(item.passphraseRef) };
+  delete result.passphraseRef;
+  return result;
+}
+
+function sshPassphraseReferences(catalog) {
+  return new Set([
+    ...(catalog?.tunnels || []),
+    ...(catalog?.terminalTasks || [])
+  ].map((item) => item.passphraseRef).filter(Boolean));
 }
 
 function isAllowedHost(host, catalog) {
@@ -938,6 +1229,15 @@ function httpError(statusCode, message) {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
+}
+
+function validateInput(factory) {
+  try {
+    return factory();
+  } catch (error) {
+    if (error?.statusCode) throw error;
+    throw httpError(400, error?.message || "请求参数无效");
+  }
 }
 
 function formatFatal(error) {

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+    <title>Local Ops 快捷面板</title>
+    <link rel="stylesheet" href="tray.css">
+  </head>
+  <body>
+    <main class="panel" aria-label="Local Ops 快捷面板">
+      <header class="panel-header">
+        <div class="brand-block">
+          <div class="brand-line">
+            <strong>Local Ops</strong>
+            <span id="connection-status" class="connection-status">正在连接</span>
+          </div>
+          <p id="summary" class="summary">正在读取本机资源…</p>
+        </div>
+        <button id="refresh-button" class="header-button" type="button">刷新</button>
+      </header>
+
+      <div id="offline-banner" class="offline-banner" hidden>
+        <strong id="offline-title">后台控制面未连接</strong>
+        <span id="offline-detail">资源状态暂时不可用，请稍后刷新。</span>
+      </div>
+
+      <div id="resource-sections" class="resource-sections" aria-live="polite"></div>
+
+      <footer class="panel-footer">
+        <button id="show-main-button" class="footer-button footer-button-primary" type="button" data-panel-action="show-main">显示控制台</button>
+        <button id="open-browser-button" class="footer-button" type="button" data-panel-action="open-browser">浏览器打开</button>
+        <button id="open-logs-button" class="footer-button" type="button" data-panel-action="open-logs">查看日志</button>
+        <button id="quit-app-button" class="footer-button footer-button-danger" type="button" data-panel-action="quit-app">退出</button>
+      </footer>
+
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    </main>
+    <script src="tray.js"></script>
+  </body>
+</html>

@@ -1,23 +1,80 @@
 # Local Ops
 
-[English](README.md) · [下载最新版](https://github.com/Arvinnma/local-ops-console/releases/latest) · [完整使用手册](docs/USER_GUIDE.zh-CN.md) · [安全说明](SECURITY.md)
+<p align="center">
+  <img src="assets/brand/local-ops-app-icon-1024.svg" width="128" height="128" alt="Local Ops 图标">
+</p>
 
-Local Ops 是一套仅在本机运行的 macOS 服务控制台，用一个 App 统一管理服务、SSH 隧道、Docker 容器、终端操作和 `*.localhost` 反向代理。安装包已经包含 Caddy 与 Process Compose，普通用户不需要单独安装 Node.js。
+<p align="center">
+  面向 macOS 的本机服务控制台：统一管理服务、SSH 隧道、Docker 容器、终端操作和易记的 <code>*.localhost</code> 地址。
+</p>
 
-> Local Ops 可以执行当前 macOS 用户配置的命令。控制 API、SSH 监听和反向代理目标均限制在本机回环地址，请勿把控制台暴露到局域网或公网。
+<p align="center">
+  <a href="README.md">English</a> ·
+  <a href="https://github.com/Arvinnma/local-ops-console/releases/latest">下载最新版</a> ·
+  <a href="docs/USER_GUIDE.zh-CN.md">完整使用手册</a> ·
+  <a href="SECURITY.md">安全说明</a>
+</p>
 
-## 主要功能
+Local Ops 把 Electron 桌面 App、浏览器控制台、Process Compose 和 Caddy 打包进一个可拖拽安装的 DMG。它适合需要长期运行多个本地进程和 SSH 转发，又希望集中查看、开关和访问这些资源的开发者。
 
-- 启动、停止、重启、编辑、拖拽排序并查看 Node / 命令服务日志。
-- 维护带保活和自动重连的 SSH 本地端口转发。
-- 使用 `http://openclaw.localhost` 这类易记域名访问本机服务。
-- 查看并控制 Docker 容器，Docker Engine 未运行时可自动打开 Docker Desktop。
-- 保存 Terminal.app / iTerm2 命令、SSH 登录和 SSH 转发操作。
-- 只监控已经由其他工具管理的现有服务，不重复接管进程。
-- 点击“需要关注”查看停止、健康检查异常和离线资源的具体清单。
-- 导出 / 导入可迁移配置，同时排除 Docker 状态、密钥和管理员授权。
-- 支持简体中文和英文界面并即时切换。
-- 提供包含 Caddy、Process Compose 的 Apple Silicon DMG 安装包。
+> [!WARNING]
+> Local Ops 可以执行当前 macOS 用户配置的命令。控制 API、SSH 监听和反向代理目标均刻意限制在本机回环地址，请勿把控制台暴露到局域网或公网。
+
+## 系统要求
+
+- Apple Silicon（`arm64`）Mac
+- macOS 12 Monterey 或更高版本
+- Docker 功能可选；使用时需要安装 Docker Desktop
+- 系统自带 Terminal.app；iTerm2 为可选项
+
+v1.8.0 暂不提供 Intel（`x64`）安装包。
+
+## 功能一览
+
+| 模块 | 能力 |
+| --- | --- |
+| 服务 | 添加 Node / 命令服务，启动、停止、重启、编辑、拖拽排序、健康检查和查看日志 |
+| SSH 隧道 | 管理只绑定回环地址的本地转发，支持保活和断线自动重连 |
+| SSH 敏感信息 | 验证加密私钥口令，并且只保存到 macOS 钥匙串 |
+| 现有服务 | 监控由其他 App 管理的端点，不重复接管进程 |
+| 反向代理 | 使用 `http://api.localhost` 或 `panel.localhost/admin` 访问本机服务 |
+| Docker | 打开 Docker Desktop，并启动、停止或重启已有容器 |
+| 终端操作 | 在 Terminal.app / iTerm2 中执行保存的命令、SSH 登录或 SSH 转发 |
+| 菜单栏 | 使用 330 像素紧凑面板直接开关资源和打开地址 |
+| 会话恢复 | 可选：仅恢复上次打开 App 时仍在运行的资源 |
+| 配置迁移 | 导入导出配置，但不复制 Docker 状态、密钥、令牌或系统授权 |
+| 语言 | 网页、桌面菜单、启动页和菜单栏面板支持简体中文 / 英文切换 |
+
+## 安装
+
+1. 从 [Releases](https://github.com/Arvinnma/local-ops-console/releases/latest) 下载 `Local-Ops-1.8.0-arm64.dmg`。
+2. 打开 DMG，把 **Local Ops** 拖到“应用程序”。
+3. 从“应用程序”启动 **Local Ops**。
+
+第一次启动会把内置后台安装到 `~/.local/share/local-ops`，并注册当前用户的 LaunchAgent。安装包已经包含 Caddy、Process Compose 和原生钥匙串 Helper；普通安装用户不需要 Node.js、Homebrew、Caddy 或 Process Compose。
+
+以后用新版 App 替换“应用程序”里的旧版时，原有配置、会话记忆和本机随机 API 密钥都会保留。
+
+### Gatekeeper 提示
+
+社区版 DMG 使用 ad-hoc 签名，尚未经过 Apple 公证。如果 macOS 首次阻止打开，请在“应用程序”中按住 Control 点击 **Local Ops**，选择“打开”并确认。正式公证分发需要 Apple Developer ID。
+
+### 可选的无端口访问
+
+Caddy 默认监听 `127.0.0.1:19080`。设置页可以安装一个仅作用于本机回环地址的 macOS 规则，把本机 80 端口转发到 Caddy。macOS 只会要求一次管理员密码；启用后可直接访问 `http://openclaw.localhost`，不用再写 `:19080`。该规则可随时在设置中关闭并清理。
+
+## 第一次使用
+
+1. 进入“服务 → 添加资源”，填写工作目录和启动命令。
+2. 如需易记地址，可同时配置本地域名和服务端口。
+3. 在“SSH 隧道”添加本地转发；私钥已加密时，可在表单中把口令保存到钥匙串。
+4. 已经由其他工具启动的服务，可只在“反向代理”或“现有服务”中配置，不重复接管。
+5. 点击 macOS 菜单栏的 Local Ops 图标，使用第一层快捷开关。
+6. 如需记忆运行状态，再开启“启动 App 时恢复上次运行状态”；该功能默认关闭。
+
+总览中的“需要关注”可以展开完整清单，显示每个停止、健康检查失败或离线资源，并跳转到对应页面。
+
+字段填写示例、钥匙串行为、开机语义、备份范围、CLI、升级、卸载和排错方法见[完整使用手册](docs/USER_GUIDE.zh-CN.md)。
 
 ## 架构
 
@@ -29,40 +86,15 @@ Local Ops.app / 浏览器
           │
           ├── Process Compose Core（控制台、Caddy、服务调度器）
           ├── Process Compose Worker（用户服务、SSH 隧道）
-          └── Caddy（127.0.0.1:19080，可选回环 80 端口入口）
+          ├── Caddy（127.0.0.1:19080，可选回环 80 端口入口）
+          └── Docker CLI / Terminal.app / iTerm2（仅按需调用）
 ```
 
-用户服务使用独立 Worker，因此添加、删除或修改资源时不会重启 Electron 窗口、网页控制台或 Caddy。
+用户服务运行在独立 Worker 中，修改配置时只热更新 Worker，不会重启桌面窗口、网页控制台或 Caddy。
 
-## 安装最新版
+## 命令行
 
-系统要求：Apple Silicon（`arm64`）Mac。
-
-1. 从 [Releases](https://github.com/Arvinnma/local-ops-console/releases/latest) 下载 `Local-Ops-1.7.0-arm64.dmg`。
-2. 打开 DMG，把 **Local Ops** 拖到“应用程序”。
-3. 从“应用程序”启动 **Local Ops**。
-
-第一次启动会把内置后台安装到 `~/.local/share/local-ops`。更新 App 时会保留原来的服务、SSH 隧道、域名、终端操作和本机随机密钥。
-
-设置页可以启用“无端口访问”。首次启用时 macOS 会要求输入一次管理员密码，把本机回环 80 端口转发到 Caddy；之后可直接访问 `http://openclaw.localhost`，无需再写 `:19080`。该规则只作用于 `127.0.0.1` 和 `::1`，也可以随时关闭并清理。
-
-当前安装包使用本地临时签名，尚未经过 Apple 公证。如果首次打开被 Gatekeeper 阻止，可按住 Control 点击 App 后选择“打开”。对外大规模分发时应配置 Developer ID 签名与公证。
-
-## 快速使用
-
-- **总览**：查看控制面、托管进程、快捷入口、现有服务以及“需要关注”详情。
-- **服务**：配置工作目录、启动命令、重启策略、健康检查和可选本地域名。
-- **SSH 隧道**：填写 SSH 跳板机、本地监听端口和转发目标。
-- **反向代理**：把 `*.localhost` 域名映射到本机回环端口。
-- **Docker**：打开 Docker Desktop，集中启动、停止或重启容器。
-- **终端**：保存 Terminal.app / iTerm2 命令、SSH 登录或 SSH 本地转发。
-- **设置**：管理启动自动化、无端口访问、语言以及配置迁移。
-
-每个字段的填写示例、开机行为、配置导入导出范围和排错方法见[完整使用手册](docs/USER_GUIDE.zh-CN.md)。
-
-## 常用命令
-
-安装器可写入 Homebrew bin 目录时，会创建 `localops` 命令：
+安装器能写入标准 Homebrew bin 目录时，会创建 `localops` 命令：
 
 ```bash
 localops status
@@ -78,7 +110,19 @@ localops tui
 localops tui-core
 ```
 
-项目自带的终端脚本会加载用户 shell 环境，并在可用时先执行 `proxy_on`。
+项目自带终端脚本会加载用户 shell 环境，并在系统存在 `proxy_on` 命令时优先执行它。
+
+## 本机数据与隐私
+
+Local Ops 不需要账号或云服务，运行数据只保存在本机：
+
+- `~/.local/share/local-ops/config/catalog.json`：资源与偏好
+- `~/.local/share/local-ops/config/last-session.json`：可选的运行状态记忆
+- `~/.local/share/local-ops/config/process-compose.token`：本机随机 API 密钥
+- `~/.local/share/local-ops/runtime/`：进程和控制面日志
+- macOS 登录钥匙串：加密私钥口令
+
+可迁移导出不会包含 Docker 资源、运行状态记忆、API 密钥、私钥内容、私钥口令、钥匙串随机引用、系统端口或管理员授权。
 
 ## 从源码构建
 
@@ -87,33 +131,28 @@ localops tui-core
 ```bash
 brew install node caddy
 brew install f1bonacc1/tap/process-compose
-npm install
-npm test
+npm ci
 npm run check
+npm test
+npm run build:keychain
+npm run test:keychain
 cd desktop
-npm install
+npm ci
 npm run dmg
 ```
 
-安装包输出到 `desktop/dist/Local-Ops-1.7.0-arm64.dmg`。`desktop/scripts/prepare-bundle.zsh` 会把当前 Caddy 与 Process Compose 二进制复制进 App，所以最终用户不需要再安装它们。
+安装包输出到 `desktop/dist/Local-Ops-1.8.0-arm64.dmg`。打包步骤会把当前 Caddy 与 Process Compose 二进制复制进 App。
 
-开发模式、本地安装、目录结构和发布流程见[开发文档](docs/DEVELOPMENT.md)。
+修改打包、原生 Helper、回环监听或 Electron 安全设置前，请先阅读[开发与发布文档](docs/DEVELOPMENT.md)。
 
-## 本机数据与安全
+## 发布验收
 
-以下内容不会进入 Git：
-
-- `config/catalog.json`：当前机器的真实服务、隧道、域名、终端操作和设置。
-- `config/process-compose.token`：本机随机生成的控制 API 密钥。
-- `runtime/`、`generated/`：日志和运行时生成配置。
-- Electron 依赖、App、DMG 以及生成图标。
-
-仓库只保存 `config/catalog.example.json` 和安全模板。SSH 私钥只保存路径，不会被复制进安装包或导出配置。修改监听地址或 Electron 安全设置前，请先阅读 [SECURITY.md](SECURITY.md)。
+v1.8.0 发布门禁覆盖：语法和单元测试、中英文静态文案覆盖、配置往返、API 安全校验、服务生命周期与日志、Caddy 路径路由、Docker 容器生命周期、加密私钥钥匙串集成、窄窗口浏览器 QA、App 签名与架构、挂载 DMG 的布局/签名检查，以及安装到“应用程序”后的启动冒烟测试。
 
 ## 参与开发
 
-欢迎提交 Issue 和 Pull Request。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，并在提交前运行 `npm test` 与 `npm run check`。所有控制接口必须继续只监听回环地址。
+欢迎提交 Issue 和 Pull Request。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，提交前运行 `npm run check` 与 `npm test`，用户可见改动同步更新中英文，并保留 [SECURITY.md](SECURITY.md) 中的本机安全边界。
 
 ## 许可证
 
-项目使用 [MIT License](LICENSE)。第三方图标和组件说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+项目使用 [MIT License](LICENSE)，第三方说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

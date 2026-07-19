@@ -1,5 +1,5 @@
-import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.7.0";
-import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.7.0";
+import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.8.0";
+import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.8.0";
 
 const LANGUAGE_STORAGE_KEY = "local-ops-language";
 setLocale(normalizeLocale(localStorage.getItem(LANGUAGE_STORAGE_KEY)));
@@ -98,6 +98,15 @@ async function initialize() {
 }
 
 function bindEvents() {
+  document.addEventListener("invalid", (event) => {
+    const field = event.target;
+    if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement)) return;
+    if (field.validity.valueMissing) field.setCustomValidity(tr("请填写此字段。"));
+  }, true);
+
+  document.addEventListener("input", clearLocalizedValidation);
+  document.addEventListener("change", clearLocalizedValidation);
+
   document.addEventListener("click", async (event) => {
     const menuTrigger = event.target.closest("[data-action-menu]");
     if (menuTrigger) {
@@ -145,6 +154,8 @@ function bindEvents() {
 
   document.addEventListener("change", (event) => {
     if (event.target.id === "terminal-kind-select") updateTerminalSections();
+    if (event.target.name === "tunnel-clear-passphrase") togglePassphraseRemoval("tunnel", event.target.checked);
+    if (event.target.name === "terminal-clear-passphrase") togglePassphraseRemoval("terminal", event.target.checked);
     if (event.target.matches("[data-setting-key]")) void saveStartupSetting(event.target);
   });
   document.addEventListener("input", (event) => {
@@ -208,6 +219,13 @@ function bindEvents() {
   document.querySelector("#logs-refresh").addEventListener("click", () => loadLogs(ui.activeLogId));
   document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("close", restoreToastStack));
   window.addEventListener("hashchange", () => navigate(location.hash.slice(1) || "overview", false));
+}
+
+function clearLocalizedValidation(event) {
+  const field = event.target;
+  if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) {
+    field.setCustomValidity("");
+  }
 }
 
 function navigate(view, updateHash = true) {
@@ -755,8 +773,8 @@ async function importConfigurationContent(fileName, contentPromise) {
     let configuration;
     try { configuration = JSON.parse(content); } catch { throw new Error(tr("配置文件不是有效的 JSON")); }
     const confirmed = window.confirm(getLocale() === "en-US"
-      ? `Importing “${fileName}” will replace the current services, SSH tunnels, existing-service monitors, reverse proxies, terminal actions, interface language, and non-Docker startup settings.\n\nDocker, system ports, and local administrator authorization will not change. Export a backup first if needed.\n\nContinue?`
-      : `将从“${fileName}”替换当前的服务、SSH 隧道、现有服务、反向代理、终端操作、界面语言和非 Docker 启动设置。\n\nDocker、系统端口和本机管理员授权不会改变。建议导入前先导出一份备份。\n\n确定继续吗？`
+      ? `Importing “${fileName}” will replace the current services, SSH tunnels, existing-service monitors, reverse proxies, terminal actions, interface language, and startup preferences.\n\nDocker resources, remembered runtime state, system ports, and local administrator authorization will not change. Export a backup first if needed.\n\nContinue?`
+      : `将从“${fileName}”替换当前的服务、SSH 隧道、现有服务、反向代理、终端操作、界面语言和启动偏好。\n\nDocker 资源、记忆的运行状态、系统端口和本机管理员授权不会改变。建议导入前先导出一份备份。\n\n确定继续吗？`
     );
     if (!confirmed) return;
     const result = await request("/api/config/import", { method: "POST", body: configuration });
@@ -873,7 +891,7 @@ async function togglePortlessAccess() {
   if (!window.localOpsDesktop?.setPortlessAccess || ui.portless.busy) return;
   const ready = ui.portless.installed && ui.portless.configured && ui.portless.active;
   const enable = !ready;
-  if (!enable && !window.confirm("关闭后，本地域名将恢复显示 :19080。确定继续吗？")) return;
+  if (!enable && !window.confirm(tr("关闭后，本地域名将恢复显示 :19080。确定继续吗？"))) return;
   ui.portless.busy = true;
   ui.portless.error = "";
   renderPortlessAccess();
@@ -1007,16 +1025,6 @@ function toggleActionMenu(trigger) {
   menu.innerHTML = items.map(actionMenuItemMarkup).join("");
   menu.hidden = false;
 
-  const triggerRect = trigger.getBoundingClientRect();
-  const menuWidth = menu.offsetWidth;
-  const menuHeight = menu.offsetHeight;
-  const left = Math.min(Math.max(10, triggerRect.right - menuWidth), window.innerWidth - menuWidth - 10);
-  const below = triggerRect.bottom + 7;
-  const top = below + menuHeight <= window.innerHeight - 10
-    ? below
-    : Math.max(10, triggerRect.top - menuHeight - 7);
-  menu.style.left = `${Math.round(left)}px`;
-  menu.style.top = `${Math.round(top)}px`;
   menu.querySelector("[role=menuitem]")?.focus({ preventScroll: true });
 }
 
@@ -1102,7 +1110,7 @@ async function deleteResource(action, id) {
   const [noun, endpoint] = definitions[action] || [];
   if (!endpoint) return;
   const suffix = action === "delete-terminal" || action === "delete-route" ? "" : "相关进程会被停止。";
-  if (!window.confirm(`确定删除${noun}“${id}”吗？${suffix}`)) return;
+  if (!window.confirm(tr(`确定删除${noun}“${id}”吗？${suffix}`))) return;
   try {
     ui.busy = true;
     await request(`/api/${endpoint}/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -1135,6 +1143,8 @@ function openAddDialog(kind = "service") {
   setResourceIcon("tunnel-icon", "ssh");
   setResourceIcon("route-icon", "link");
   setResourceIcon("terminal-icon", "terminal");
+  configurePassphraseField("tunnel", false);
+  configurePassphraseField("terminal", false);
   form.elements.namedItem("service-autostart").checked = true;
   form.elements.namedItem("tunnel-autostart").checked = true;
   form.elements.namedItem("route-enabled").checked = true;
@@ -1196,12 +1206,13 @@ function populateResourceForm(kind, item) {
     setFormValue("tunnel-remote-host", item.remoteHost);
     setFormValue("tunnel-remote-port", item.remotePort);
     setFormValue("tunnel-key", item.identityFile);
+    configurePassphraseField("tunnel", item.hasKeyPassphrase);
     form.elements.namedItem("tunnel-autostart").checked = item.autoStart;
   } else if (kind === "route") {
     setFormValue("route-name", item.name);
     setResourceIcon("route-icon", item.icon || "link");
     setFormValue("route-id", item.id);
-    setFormValue("route-host", item.host);
+    setFormValue("route-host", `${item.host}${item.path || ""}`);
     setFormValue("route-target", item.target);
     form.elements.namedItem("route-enabled").checked = item.enabled;
   } else {
@@ -1217,6 +1228,7 @@ function populateResourceForm(kind, item) {
     setFormValue("terminal-ssh-host", item.sshHost);
     setFormValue("terminal-ssh-port", item.sshPort || 22);
     setFormValue("terminal-ssh-key", item.identityFile);
+    configurePassphraseField("terminal", item.hasKeyPassphrase);
     setFormValue("terminal-local-port", item.localPort ?? "");
     setFormValue("terminal-remote-host", item.remoteHost || "127.0.0.1");
     setFormValue("terminal-remote-port", item.remotePort ?? "");
@@ -1266,7 +1278,7 @@ async function saveResource(event) {
     if (ui.activeForm === "service") {
       const domain = editing ? "" : normalizeDomain(data.get("service-domain"));
       const port = String(data.get("service-port") || "").trim();
-      if (domain && !port) throw new Error("配置本地域名时必须填写服务端口");
+      if (domain && !port) throw new Error(tr("配置本地域名时必须填写服务端口"));
       endpoint = editing ? `/api/services/${encodeURIComponent(editing.id)}` : "/api/services";
       body = {
         name: data.get("service-name"),
@@ -1297,6 +1309,8 @@ async function saveResource(event) {
         remoteHost: data.get("tunnel-remote-host"),
         remotePort: data.get("tunnel-remote-port"),
         identityFile: data.get("tunnel-key"),
+        identityPassphrase: data.get("tunnel-key-passphrase"),
+        removeIdentityPassphrase: data.get("tunnel-clear-passphrase") === "on",
         autoStart: data.get("tunnel-autostart") === "on"
       };
     } else if (ui.activeForm === "route") {
@@ -1324,6 +1338,8 @@ async function saveResource(event) {
         sshHost: data.get("terminal-ssh-host"),
         sshPort: data.get("terminal-ssh-port"),
         identityFile: data.get("terminal-ssh-key"),
+        identityPassphrase: data.get("terminal-key-passphrase"),
+        removeIdentityPassphrase: data.get("terminal-clear-passphrase") === "on",
         localPort: data.get("terminal-local-port"),
         remoteHost: data.get("terminal-remote-host"),
         remotePort: data.get("terminal-remote-port")
@@ -1345,6 +1361,37 @@ async function saveResource(event) {
 function setFormValue(name, value) {
   const control = document.querySelector("#resource-form").elements.namedItem(name);
   if (control) control.value = value ?? "";
+}
+
+function configurePassphraseField(kind, stored) {
+  const prefix = kind === "tunnel" ? "tunnel" : "terminal";
+  const inputName = kind === "tunnel" ? "tunnel-key-passphrase" : "terminal-key-passphrase";
+  const clearName = kind === "tunnel" ? "tunnel-clear-passphrase" : "terminal-clear-passphrase";
+  const form = document.querySelector("#resource-form");
+  const input = form.elements.namedItem(inputName);
+  const clear = form.elements.namedItem(clearName);
+  const row = document.querySelector(`[data-passphrase-clear-row="${prefix}"]`);
+  const status = document.querySelector(`[data-passphrase-status="${prefix}"]`);
+  if (input) {
+    input.value = "";
+    input.disabled = false;
+    input.placeholder = tr(stored ? "已安全保存在 macOS 钥匙串；留空保持不变" : "仅在私钥已加密时填写");
+  }
+  if (clear) clear.checked = false;
+  if (row) row.hidden = !stored;
+  if (status) {
+    status.textContent = tr(stored
+      ? "私钥口令已保存在 macOS 钥匙串中；输入新口令可以替换它。"
+      : "口令只会保存到 macOS 钥匙串，不会写入配置、日志或导出文件。");
+  }
+}
+
+function togglePassphraseRemoval(kind, remove) {
+  const inputName = kind === "tunnel" ? "tunnel-key-passphrase" : "terminal-key-passphrase";
+  const input = document.querySelector("#resource-form").elements.namedItem(inputName);
+  if (!input) return;
+  input.disabled = Boolean(remove);
+  if (remove) input.value = "";
 }
 
 function setResourceIcon(fieldName, iconId) {
@@ -1497,7 +1544,7 @@ async function openLogs(id) {
   ui.activeLogId = id;
   const process = ui.state?.processes.find((item) => item.id === id);
   document.querySelector("#logs-title").textContent = process?.name || id;
-  document.querySelector("#logs-output").textContent = "正在读取日志…";
+  document.querySelector("#logs-output").textContent = tr("正在读取日志…");
   document.querySelector("#logs-dialog").showModal();
   await loadLogs(id);
 }
@@ -1507,10 +1554,10 @@ async function loadLogs(id) {
   try {
     const result = await request(`/api/logs/${encodeURIComponent(id)}?tail=300`);
     const output = document.querySelector("#logs-output");
-    output.textContent = result.logs || "暂时没有日志输出。";
+    output.textContent = result.logs || tr("暂时没有日志输出。");
     output.scrollTop = output.scrollHeight;
   } catch (error) {
-    document.querySelector("#logs-output").textContent = error.message;
+    document.querySelector("#logs-output").textContent = tr(error.message);
   }
 }
 
@@ -1565,11 +1612,15 @@ function defaultAddKind() {
 
 function resourceIcon(iconId, fallback = "server", className = "") {
   const icon = ICON_BY_ID.get(iconId) || ICON_BY_ID.get(fallback) || ICON_LIBRARY[0];
-  return `<span class="resource-icon ${escapeAttribute(className)}" style="--resource-icon-color:#${icon.hex};--resource-icon-soft:#${icon.hex}16" aria-hidden="true">${iconMarkup(icon)}</span>`;
+  return `<span class="resource-icon ${escapeAttribute(iconColorClass(icon))} ${escapeAttribute(className)}" aria-hidden="true">${iconMarkup(icon)}</span>`;
 }
 
 function iconMarkup(icon) {
-  return `<svg viewBox="${escapeAttribute(icon.viewBox)}" style="color:#${icon.hex}" aria-hidden="true">${icon.svg}</svg>`;
+  return `<svg class="${escapeAttribute(iconColorClass(icon))}" viewBox="${escapeAttribute(icon.viewBox)}" aria-hidden="true">${icon.svg}</svg>`;
+}
+
+function iconColorClass(icon) {
+  return `icon-color-${String(icon.id).toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`;
 }
 
 function kindSymbol(kind) {
@@ -1588,9 +1639,16 @@ function actionLabel(action) {
 }
 
 function normalizeDomain(value) {
-  const text = String(value || "").trim().toLowerCase();
+  const text = String(value || "").trim();
   if (!text) return "";
-  return text.endsWith(".localhost") ? text : `${text}.localhost`;
+  const withoutProtocol = text.replace(/^https?:\/\//i, "");
+  const slashIndex = withoutProtocol.indexOf("/");
+  const rawHost = slashIndex >= 0 ? withoutProtocol.slice(0, slashIndex) : withoutProtocol;
+  const accessPath = slashIndex >= 0 ? withoutProtocol.slice(slashIndex) : "";
+  const host = rawHost.toLowerCase().endsWith(".localhost")
+    ? rawHost.toLowerCase()
+    : `${rawHost.toLowerCase()}.localhost`;
+  return `${host}${accessPath}`;
 }
 
 function formatTime(value) {
@@ -1616,7 +1674,7 @@ function formatBytes(value) {
 function toast(message, type = "info") {
   const element = document.createElement("div");
   element.className = `toast ${type}`;
-  element.textContent = message;
+  element.textContent = tr(message);
   restoreToastStack();
   document.querySelector("#toast-stack").append(element);
   window.setTimeout(() => element.remove(), 3600);

@@ -17,6 +17,8 @@ Do not open a public issue containing an exploit, token, private hostname, SSH k
 - Never publish the console through a public Caddy route, Cloudflare Tunnel, ngrok, a router port forward, or a similar service.
 - Never commit `config/catalog.json`, `config/process-compose.token`, `.env` files, runtime logs, or private keys.
 - SSH private keys are referenced by path only. They must not be copied into the project, exported configuration, or application bundle.
+- Encrypted private-key passphrases must be stored only by the bundled Security.framework Keychain Helper. Configuration may contain an opaque reference, but portable exports, logs, generated process arguments, and API responses must not expose either the passphrase or its Keychain reference.
+- SSH AskPass must answer only private-key passphrase prompts. It must reject host confirmation, account-password, and keyboard-interactive prompts.
 - Electron must keep `nodeIntegration` disabled, `contextIsolation` enabled, sandboxing enabled, navigation restricted, and permissions denied by default.
 - Reverse-proxy targets and SSH local listeners must stay on loopback addresses.
 - Web mutations must retain their temporary-token and request-origin checks.
@@ -25,4 +27,4 @@ If a local API token enters Git history, rotate `config/process-compose.token` i
 
 ## 中文说明
 
-Local Ops 能执行用户配置的本机命令和 SSH 隧道，因此必须始终作为本机工具使用。不要把控制台或 `19080`、`19090`、`19091`、`19092`、`19093` 端口暴露到局域网或公网；不要提交真实配置、API 密钥、环境变量、日志或 SSH 私钥。发现安全问题时请使用 GitHub 私密安全报告，不要在公开 Issue 中粘贴敏感信息。
+Local Ops 能执行用户配置的本机命令和 SSH 隧道，因此必须始终作为本机工具使用。不要把控制台或 `19080`、`19090`、`19091`、`19092`、`19093` 端口暴露到局域网或公网；不要提交真实配置、API 密钥、环境变量、日志或 SSH 私钥。加密私钥口令只允许保存在 macOS 登录钥匙串中，不进入配置、日志和导出文件。发现安全问题时请使用 GitHub 私密安全报告，不要在公开 Issue 中粘贴敏感信息。

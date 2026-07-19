@@ -1,11 +1,17 @@
 # Development and Release Guide
 
+## Supported build target
+
+Local Ops v1.8.0 ships an Apple Silicon (`arm64`) macOS package. Intel (`x64`) and universal packages are not part of the current release matrix.
+
 ## Prerequisites
 
-- Apple Silicon macOS host
+- Apple Silicon Mac running macOS 12 or newer
 - Node.js 22.12 or newer and npm
 - Caddy in `PATH`
 - Process Compose in `PATH`
+- Xcode Command Line Tools for the native Keychain helper
+- Docker Desktop only for the optional Docker lifecycle test
 
 ```bash
 brew install node caddy
@@ -15,66 +21,142 @@ brew install f1bonacc1/tap/process-compose
 ## Repository layout
 
 ```text
-public/       Browser UI and local icon library
-src/          Configuration, orchestration, Docker, and HTTP APIs
-scripts/      Rendering, installation, control, and lifecycle scripts
-desktop/      Electron shell and electron-builder configuration
+assets/       Canonical vector brand sources
+public/       Browser UI, translations, and icon library
+src/          Configuration, Keychain integration, orchestration, Docker, and HTTP APIs
+scripts/      Rendering, installation, native-helper build, control, and lifecycle scripts
+desktop/      Electron shell, menu-bar panel, portless helper assets, and packaging config
+native/       Security.framework Keychain helper source
 config/       Safe example catalog; real catalog is ignored
-launchd/      LaunchAgent templates
-tests/        Node test suite
+launchd/      Per-user LaunchAgent template
+tests/        Unit, localization, Keychain, and end-to-end smoke tests
+docs/         User, development, and release documentation
 ```
 
-Runtime data is written to `~/.local/share/local-ops` after installation. Do not develop against a committed real catalog.
+Installed runtime data lives under `~/.local/share/local-ops`. Never copy a real catalog, token, session file, private key, or runtime log into the repository.
 
-## Validate changes
+## Install dependencies
 
 ```bash
-npm install
-npm run check
-npm test
+npm ci
+cd desktop
+npm ci
+cd ..
 ```
 
-For UI changes, test both Simplified Chinese and English, keyboard focus, narrow-window horizontal scrolling, menus, dialogs, and reduced-motion behavior.
+## Development checks
 
-## Local backend installation
+```bash
+npm run check
+npm test
+npm run build:keychain
+npm run test:keychain
+```
+
+`npm test` covers configuration normalization, route paths, loopback validation, portable migration, legacy startup migration, AppleScript compilation, and English-copy coverage. `npm run test:keychain` creates a temporary encrypted Ed25519 key, verifies that a wrong passphrase fails, and then unlocks it through the Local Ops Keychain/AskPass path. Temporary keys and Keychain items are removed in `finally` cleanup.
+
+For an installed backend smoke test:
 
 ```bash
 ./scripts/install.zsh
+npm run test:smoke
 ```
 
-This source-development installer uses Homebrew dependencies and registers the local LaunchAgent. Normal DMG users do not run this script.
+The smoke test creates uniquely named temporary resources, exercises security headers and mutation guards, starts/restarts/stops a command service, checks logs and ordering, validates a tunnel definition, proxies a real path through Caddy, checks terminal configuration and export scope, then removes every temporary resource.
+
+To include a dedicated temporary Docker container lifecycle without touching existing containers:
+
+```bash
+LOCAL_OPS_TEST_DOCKER_MUTATIONS=1 npm run test:smoke
+```
+
+## Browser and accessibility QA
+
+Test both Simplified Chinese and English at desktop and 720 px minimum window widths:
+
+- all seven views and responsive table scrolling;
+- Needs Attention details and jump links;
+- add/edit dialogs, icon selection, required-field validation, and toast stacking;
+- primary start/stop actions, overflow-menu keyboard navigation, and hidden unsupported actions;
+- optimistic drag ordering;
+- configuration export/import warnings;
+- reduced-motion mode, focus visibility, and accessible names.
+
+Do not change real user resources for visual QA. Use temporary smoke-test IDs or a disposable catalog.
+
+With the installed backend running and Google Chrome available, the automated browser gate verifies strict-CSP rendering, generated icon colors, anchored overflow menus, and narrow-table scrolling:
+
+```bash
+npm run test:browser
+```
 
 ## Electron development
 
 ```bash
 cd desktop
-npm install
 npm start
 ```
 
-## Build the DMG
+The Electron renderer is sandboxed, has no Node integration, denies permission requests, and restricts navigation to bundled files and local HTTP(S) addresses. The menu-bar panel uses `tray.html`, `tray.css`, and `tray.js` with the same constrained preload bridge.
+
+## Build the native assets and DMG
 
 ```bash
 cd desktop
+npm run icon
+npm run bundle
 npm run dmg
 ```
 
-The bundle step copies the backend source, Caddy binary, and Process Compose binary into `desktop/bundle/local-ops`. Electron Builder produces an Apple Silicon DMG under `desktop/dist`.
+The bundle step:
 
-To build, install, sign ad hoc, and launch the app in one command:
+1. copies safe backend source and the example catalog;
+2. copies arm64 Caddy and Process Compose binaries from `PATH`;
+3. compiles the arm64 Security.framework Keychain helper;
+4. writes a bundle manifest containing versions and architecture;
+5. packages an ad-hoc-signed Electron app and DMG.
+
+Output:
+
+```text
+desktop/dist/mac-arm64/Local Ops.app
+desktop/dist/Local-Ops-1.8.0-arm64.dmg
+```
+
+To build, replace the app in Applications, re-sign ad hoc, verify the signature, and launch it:
 
 ```bash
 ./scripts/build-app.zsh
 ```
 
-## Version checklist
+## Release gate
 
-1. Update the root and desktop package versions plus lockfiles.
-2. Update asset cache versions in `public/index.html` and `public/app.js`.
-3. Add release notes to `CHANGELOG.md` and `docs/releases/`.
-4. Run syntax checks and tests.
-5. Build the DMG and verify its architecture, signature, bundled component versions, and first-launch upgrade path.
-6. Verify the installed app in Chinese and English without starting or stopping unrelated user resources.
-7. Tag the commit and attach the DMG to a GitHub Release.
+1. Update root/desktop versions, lockfiles, cache query strings, changelog, issue template, READMEs, user guides, and release notes.
+2. Run `npm audit --omit=dev`, the desktop production audit, and the full desktop audit.
+3. Run syntax checks, unit tests, Keychain integration, installed smoke, automated browser QA, and optional Docker mutation smoke.
+4. Run Gitleaks against both Git history and the full working tree with redaction enabled.
+5. Build the DMG and verify:
+   - `arm64` for the app executable, Caddy, Process Compose, and Keychain helper;
+   - valid deep ad-hoc signature;
+   - expected bundle identifier and version;
+   - no real catalog, token, last-session file, `.env`, private key, or logs in the app/DMG;
+   - mounted DMG layout/signature and installed-app launch;
+   - upgrade preserves an existing user catalog.
+6. Re-run browser and menu-bar QA from the packaged app in Chinese and English.
+7. Generate the SHA-256 checksum and add it to `docs/releases/v1.8.0.md`.
+8. Commit and push while the repository is still private; verify CI.
+9. Make the repository public only after the secret audit and CI pass.
+10. Create signed Git tag `v1.8.0` when possible and publish the GitHub Release with the arm64 DMG and checksum.
 
-Public distribution should replace ad-hoc signing with Apple Developer ID signing, Hardened Runtime, entitlements, and notarization.
+Public distribution should eventually replace ad-hoc signing with Apple Developer ID signing, Hardened Runtime, entitlements, and notarization.
+
+## Secret and artifact hygiene
+
+The following must remain ignored and absent from all commits and release bundles:
+
+- `config/catalog.json`, `config/last-session.json`, and `config/process-compose.token`;
+- `.env*`, private keys, certificates, and provisioning files;
+- `runtime/`, generated runtime YAML/Caddy files, app bundles, DMGs, and dependency directories;
+- screenshots or docs containing private hosts, usernames, paths, tokens, or logs.
+
+If a credential ever enters Git history, rotate it first and rewrite the history before making the repository public.

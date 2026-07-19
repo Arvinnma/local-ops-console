@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, screen, session, shell } = require("electron");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const crypto = require("node:crypto");
@@ -22,12 +22,26 @@ const PORTLESS_ANCHOR = "/etc/pf.anchors/com.arvin.localops";
 const PORTLESS_PROMPT_MARKER = path.join(INSTALL_DIR, "config", ".portless-prompted-v1");
 const LOG_DIR = path.join(os.homedir(), "Library", "Logs", "Local Ops");
 const LOG_FILE = path.join(LOG_DIR, "desktop.log");
+const TRAY_RESOURCE_NAME_WIDTH = 28;
+const TRAY_STATUS_WIDTH = 12;
+const TRAY_ROUTE_COLUMN_WIDTH = 24;
+const TRAY_PANEL_WIDTH = 330;
+const TRAY_PANEL_MAX_HEIGHT = 740;
 
 let mainWindow = null;
 let tray = null;
+let trayPanelWindow = null;
+let trayMenu = null;
+let traySnapshot = null;
+let trayRefreshPromise = null;
+const trayActionsInFlight = new Set();
 let reconnectTimer = null;
 let healthTimer = null;
+let sessionCaptureTimer = null;
+let sessionCapturePromise = null;
 let isQuitting = false;
+let quitCaptureStarted = false;
+let quitCaptureCompleted = false;
 let isOnline = false;
 let installPromise = null;
 let startupActionsApplied = false;
@@ -41,12 +55,28 @@ const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) app.quit();
 
 app.on("second-instance", () => showMainWindow());
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (quitCaptureCompleted) {
+    isQuitting = true;
+    clearTimers();
+    return;
+  }
+  event.preventDefault();
+  if (quitCaptureStarted) return;
+  quitCaptureStarted = true;
   isQuitting = true;
   clearTimers();
+  void Promise.race([
+    captureSessionState(),
+    new Promise((resolve) => setTimeout(resolve, 5000))
+  ]).finally(() => {
+    quitCaptureCompleted = true;
+    app.quit();
+  });
 });
 
 app.whenReady().then(async () => {
+  applyDockIcon();
   configureSecurity();
   configureIpc();
   configureAboutPanel();
@@ -55,7 +85,51 @@ app.whenReady().then(async () => {
   createMainWindow();
   await connectControlPlane();
   startHealthMonitor();
+  if (!app.isPackaged && process.env.LOCAL_OPS_TRAY_PREVIEW === "1") {
+    mainWindow?.hide();
+    toggleTrayPanel();
+    const trayCapturePath = process.env.LOCAL_OPS_TRAY_CAPTURE;
+    if (trayCapturePath) {
+      setTimeout(async () => {
+        if (!trayPanelWindow || trayPanelWindow.isDestroyed()) return;
+        try {
+          if (isOnline) {
+            await refreshTraySnapshot(true);
+            pushTrayPanelState();
+            await new Promise((resolve) => setTimeout(resolve, 120));
+          }
+          if (process.env.LOCAL_OPS_TRAY_CAPTURE_SCROLL === "bottom") {
+            const scrollState = await trayPanelWindow.webContents.executeJavaScript(
+              '(() => { const element = document.querySelector("#resource-sections"); element.scrollTop = element.scrollHeight; return { scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight }; })()',
+              true
+            );
+            log(`tray preview scroll state: ${JSON.stringify(scrollState)}`);
+            await new Promise((resolve) => setTimeout(resolve, 120));
+          }
+          const capture = await trayPanelWindow.webContents.capturePage();
+          fs.writeFileSync(trayCapturePath, capture.toPNG());
+          log(`tray preview captured: ${trayCapturePath}`);
+        } catch (error) {
+          log(`tray preview capture failed: ${error.message}`);
+        }
+      }, 1200);
+    }
+  }
 });
+
+function applyDockIcon() {
+  if (process.platform !== "darwin" || !app.dock) return;
+
+  const iconPath = path.join(__dirname, "assets", "local-ops-app-icon-1024.png");
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    log(`Dock icon could not be loaded: ${iconPath}`);
+    return;
+  }
+
+  app.dock.setIcon(icon);
+  log(`Dock icon applied at runtime: ${iconPath}`);
+}
 
 app.on("activate", () => {
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
@@ -68,7 +142,7 @@ app.on("window-all-closed", () => {
 
 process.on("uncaughtException", (error) => {
   log(`uncaughtException: ${error.stack || error.message}`);
-  if (app.isReady()) dialog.showErrorBox("Local Ops 遇到错误", error.message);
+  if (app.isReady()) dialog.showErrorBox(trayText("Local Ops 遇到错误", "Local Ops Error"), nativeErrorMessage(error.message));
 });
 
 process.on("unhandledRejection", (error) => {
@@ -102,7 +176,7 @@ function createMainWindow() {
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, "splash.html"));
+  mainWindow.loadFile(path.join(__dirname, "splash.html"), { query: { lang: desktopLanguage() } });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
 
   mainWindow.on("close", (event) => {
@@ -139,7 +213,7 @@ function createMainWindow() {
     scheduleReconnect(500);
   });
 
-  mainWindow.webContents.on("console-message", (_event, details) => {
+  mainWindow.webContents.on("console-message", (details) => {
     const payload = typeof details === "object" && details
       ? `${details.level || "log"}: ${details.message || ""} (${details.sourceId || "renderer"}:${details.lineNumber || 0})`
       : String(details || "");
@@ -159,73 +233,715 @@ function configureAboutPanel() {
     applicationName: "Local Ops",
     applicationVersion: app.getVersion(),
     version: `Electron ${process.versions.electron}`,
-    copyright: "本机服务、SSH 隧道与反向代理控制台"
+    copyright: trayText("本机服务、SSH 隧道与反向代理控制台", "Local services, SSH tunnels, and reverse-proxy console")
   });
 }
 
 function createApplicationMenu() {
+  const t = trayText;
   const template = [
     {
       label: "Local Ops",
       submenu: [
-        { role: "about", label: "关于 Local Ops" },
+        { role: "about", label: t("关于 Local Ops", "About Local Ops") },
         { type: "separator" },
-        { label: "显示控制台", accelerator: "CommandOrControl+1", click: showMainWindow },
-        { label: "在浏览器中打开", click: () => openSafeExternal(browserUrl()) },
-        { label: "打开日志文件夹", click: () => shell.openPath(LOG_DIR) },
+        { label: t("显示控制台", "Show Console"), accelerator: "CommandOrControl+1", click: showMainWindow },
+        { label: t("在浏览器中打开", "Open in Browser"), click: () => openSafeExternal(browserUrl()) },
+        { label: t("打开日志文件夹", "Open Logs Folder"), click: () => shell.openPath(LOG_DIR) },
         { type: "separator" },
-        { label: "重启后台控制面", click: restartControlPlane },
+        { label: t("重启后台控制面", "Restart Control Plane"), click: restartControlPlane },
         { type: "separator" },
-        { role: "hide", label: "隐藏 Local Ops" },
-        { role: "hideOthers", label: "隐藏其他" },
-        { role: "unhide", label: "全部显示" },
+        { role: "hide", label: t("隐藏 Local Ops", "Hide Local Ops") },
+        { role: "hideOthers", label: t("隐藏其他", "Hide Others") },
+        { role: "unhide", label: t("全部显示", "Show All") },
         { type: "separator" },
-        { role: "quit", label: "退出 Local Ops" }
+        { role: "quit", label: t("退出 Local Ops", "Quit Local Ops") }
       ]
     },
-    { role: "editMenu", label: "编辑" },
+    { role: "editMenu", label: t("编辑", "Edit") },
     {
-      label: "显示",
+      label: t("显示", "View"),
       submenu: [
-        { role: "reload", label: "刷新页面" },
-        { role: "forceReload", label: "强制刷新" },
+        { role: "reload", label: t("刷新页面", "Reload") },
+        { role: "forceReload", label: t("强制刷新", "Force Reload") },
         { type: "separator" },
-        { role: "resetZoom", label: "实际大小" },
-        { role: "zoomIn", label: "放大" },
-        { role: "zoomOut", label: "缩小" },
+        { role: "resetZoom", label: t("实际大小", "Actual Size") },
+        { role: "zoomIn", label: t("放大", "Zoom In") },
+        { role: "zoomOut", label: t("缩小", "Zoom Out") },
         { type: "separator" },
-        { role: "togglefullscreen", label: "进入全屏幕" }
+        { role: "togglefullscreen", label: t("进入全屏幕", "Toggle Full Screen") }
       ]
     },
-    { role: "windowMenu", label: "窗口" }
+    { role: "windowMenu", label: t("窗口", "Window") }
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 function createTray() {
-  let image = nativeImage.createFromNamedImage("NSStatusAvailable");
+  let image = nativeImage.createFromPath(path.join(__dirname, "assets", "tray-iconTemplate.png"));
+  if (image.isEmpty()) image = nativeImage.createFromNamedImage("NSStatusAvailable");
   if (image.isEmpty()) image = nativeImage.createEmpty();
   image.setTemplateImage(true);
   tray = new Tray(image);
-  tray.setToolTip("Local Ops · 正在连接");
-  tray.on("click", showMainWindow);
+  tray.setToolTip(`Local Ops · ${trayText("正在连接", "Connecting")}`);
+  const openMenu = () => {
+    if (!tray || tray.isDestroyed()) return;
+    if (process.platform !== "darwin") {
+      tray.popUpContextMenu(trayMenu || buildTrayMenu());
+      return;
+    }
+    toggleTrayPanel();
+  };
+  tray.on("click", openMenu);
+  tray.on("right-click", openMenu);
+  tray.on("double-click", showMainWindow);
+  createTrayPanelWindow();
   updateTray(false);
+}
+
+function createTrayPanelWindow() {
+  if (trayPanelWindow && !trayPanelWindow.isDestroyed()) return trayPanelWindow;
+
+  trayPanelWindow = new BrowserWindow({
+    width: TRAY_PANEL_WIDTH,
+    height: TRAY_PANEL_MAX_HEIGHT,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: true,
+    roundedCorners: true,
+    movable: false,
+    type: "panel",
+    acceptFirstMouse: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      devTools: !app.isPackaged,
+      spellcheck: false
+    }
+  });
+
+  trayPanelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  trayPanelWindow.loadFile(path.join(__dirname, "tray.html"));
+  trayPanelWindow.on("blur", () => {
+    if (!process.env.LOCAL_OPS_TRAY_CAPTURE) trayPanelWindow?.hide();
+  });
+  trayPanelWindow.on("closed", () => { trayPanelWindow = null; });
+  trayPanelWindow.webContents.on("did-finish-load", pushTrayPanelState);
+  trayPanelWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  trayPanelWindow.webContents.on("will-navigate", (event, url) => {
+    if (isAllowedBundledFile(url)) return;
+    event.preventDefault();
+  });
+  trayPanelWindow.webContents.on("will-attach-webview", (event) => event.preventDefault());
+  trayPanelWindow.webContents.on("console-message", (details) => {
+    const message = typeof details === "object" ? String(details?.message || "") : String(details || "");
+    if (/error|warning|uncaught|rejection/i.test(message)) log(`tray renderer: ${message}`);
+  });
+  return trayPanelWindow;
+}
+
+function toggleTrayPanel() {
+  const panel = createTrayPanelWindow();
+  if (panel.isVisible()) {
+    panel.hide();
+    return;
+  }
+  positionTrayPanel(panel);
+  pushTrayPanelState();
+  panel.show();
+  panel.focus();
+  if (isOnline) void refreshTraySnapshot(true);
+}
+
+function positionTrayPanel(panel) {
+  if (!tray || tray.isDestroyed()) return;
+  const trayBounds = tray.getBounds();
+  const display = screen.getDisplayNearestPoint({
+    x: Math.round(trayBounds.x + trayBounds.width / 2),
+    y: Math.round(trayBounds.y + trayBounds.height / 2)
+  });
+  const workArea = display.workArea;
+  const height = Math.min(TRAY_PANEL_MAX_HEIGHT, Math.max(360, workArea.height - 12));
+  const x = Math.min(
+    workArea.x + workArea.width - TRAY_PANEL_WIDTH - 6,
+    Math.max(workArea.x + 6, Math.round(trayBounds.x + trayBounds.width / 2 - TRAY_PANEL_WIDTH / 2))
+  );
+  let y = Math.max(workArea.y + 6, Math.round(trayBounds.y + trayBounds.height + 5));
+  if (y + height > workArea.y + workArea.height - 6) y = workArea.y + 6;
+  panel.setBounds({ x, y, width: TRAY_PANEL_WIDTH, height }, false);
 }
 
 function updateTray(online) {
   isOnline = online;
   if (!tray) return;
-  tray.setToolTip(`Local Ops · ${online ? "控制面在线" : "控制面离线"}`);
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: online ? "● 控制面在线" : "● 控制面离线", enabled: false },
+  if (!online) traySnapshot = null;
+  tray.setToolTip(trayTooltip());
+  rebuildTrayMenu();
+  if (online) void refreshTraySnapshot();
+}
+
+function rebuildTrayMenu() {
+  trayMenu = buildTrayMenu();
+  if (tray && process.platform !== "darwin") tray.setContextMenu(trayMenu);
+  pushTrayPanelState();
+}
+
+function buildTrayMenu() {
+  const t = trayText;
+  const footer = [
+    { label: t("刷新状态", "Refresh Status"), click: () => void refreshTraySnapshot(true) },
+    { label: t("显示控制台", "Show Console"), click: showMainWindow },
+    {
+      label: t("更多", "More"),
+      submenu: [
+        { label: t("在浏览器中打开", "Open in Browser"), click: () => openSafeExternal(browserUrl()) },
+        { label: t("打开日志文件夹", "Open Logs Folder"), click: () => shell.openPath(LOG_DIR) },
+        { label: t("重启后台控制面", "Restart Control Plane"), click: restartControlPlane }
+      ]
+    },
     { type: "separator" },
-    { label: "显示控制台", click: showMainWindow },
-    { label: "在浏览器中打开", click: () => openSafeExternal(browserUrl()) },
-    { label: "重启后台控制面", click: restartControlPlane },
-    { label: "打开日志文件夹", click: () => shell.openPath(LOG_DIR) },
+    { label: t("退出 Local Ops", "Quit Local Ops"), click: () => { isQuitting = true; app.quit(); } }
+  ];
+
+  if (!isOnline) {
+    return Menu.buildFromTemplate([
+      { label: t("● 控制面离线", "● Control Plane Offline"), enabled: false },
+      { type: "separator" },
+      { label: t("重新连接后台", "Reconnect Backend"), click: connectControlPlane },
+      ...footer
+    ]);
+  }
+
+  if (!traySnapshot) {
+    return Menu.buildFromTemplate([
+      { label: t("● 控制面在线 · 正在读取资源…", "● Online · Loading Resources…"), enabled: false },
+      { type: "separator" },
+      ...footer
+    ]);
+  }
+
+  const { bootstrap, state, docker } = traySnapshot;
+  const config = bootstrap.config || {};
+  const processById = new Map((state.processes || []).map((item) => [item.id, item]));
+  const services = config.services || [];
+  const tunnels = config.tunnels || [];
+  const routes = config.routes || [];
+  const terminalTasks = config.terminalTasks || [];
+  const runningServices = services.filter((item) => processById.get(item.id)?.status === "running").length;
+  const runningTunnels = tunnels.filter((item) => processById.get(item.id)?.status === "running").length;
+  const containers = docker.containers || [];
+  const runningContainers = containers.filter((item) => item.running).length;
+
+  return Menu.buildFromTemplate([
+    sectionMenuLabel(t(`服务 · ${runningServices}/${services.length} 运行`, `Services · ${runningServices}/${services.length} running`)),
+    ...managedProcessMenu(services, processById, "service"),
+    sectionMenuLabel(t(`SSH 隧道 · ${runningTunnels}/${tunnels.length} 运行`, `SSH Tunnels · ${runningTunnels}/${tunnels.length} running`)),
+    ...managedProcessMenu(tunnels, processById, "tunnel"),
+    sectionMenuLabel(t(`终端操作 · ${terminalTasks.length}`, `Terminal Actions · ${terminalTasks.length}`)),
+    ...terminalTaskMenu(terminalTasks),
+    sectionMenuLabel(docker.daemonOnline
+      ? t(`Docker 容器 · ${runningContainers}/${containers.length} 运行`, `Docker Containers · ${runningContainers}/${containers.length} running`)
+      : t("Docker 容器 · Engine 未运行", "Docker Containers · Engine Offline")),
+    ...dockerMenu(docker),
+    sectionMenuLabel(t(`反向代理 · ${routes.filter((item) => item.enabled !== false).length}`, `Reverse Proxies · ${routes.filter((item) => item.enabled !== false).length}`)),
+    ...routeMenu(routes),
     { type: "separator" },
-    { label: "退出", click: () => { isQuitting = true; app.quit(); } }
-  ]));
+    ...footer
+  ]);
+}
+
+function sectionMenuLabel(label) {
+  return { label, enabled: false };
+}
+
+function managedProcessMenu(definitions, processById, kind) {
+  if (!definitions.length) return [{ label: trayText("尚未配置", "Not Configured"), enabled: false }];
+  return definitions.map((definition) => {
+    const processState = processById.get(definition.id);
+    const running = processState?.status === "running";
+    const action = running ? "stop" : "start";
+    const actionKey = `process:${definition.id}`;
+    return {
+      label: trayResourceLabel(definition.name || definition.id, running, trayActionsInFlight.has(actionKey)),
+      enabled: isOnline && !trayActionsInFlight.has(actionKey),
+      click: () => void performTrayMutation(
+        actionKey,
+        `/api/processes/${encodeURIComponent(definition.id)}/${action}`,
+        trayText(
+          `${running ? "停止" : "启动"}${kind === "tunnel" ? " SSH 隧道" : "服务"}失败`,
+          `Failed to ${running ? "stop" : "start"} ${kind === "tunnel" ? "SSH tunnel" : "service"}`
+        )
+      )
+    };
+  });
+}
+
+function routeMenu(routes) {
+  if (!routes.length) return [{ label: trayText("尚未配置", "Not Configured"), enabled: false }];
+  return routes.map((route) => ({
+    label: trayRouteLabel(route.name || route.id, routeHost(route.url)),
+    enabled: route.enabled !== false && isSafeExternalUrl(route.url),
+    click: () => openSafeExternal(route.url)
+  }));
+}
+
+function terminalTaskMenu(tasks) {
+  if (!tasks.length) return [{ label: trayText("尚未配置", "Not Configured"), enabled: false }];
+  return tasks.map((task) => {
+    const actionKey = `terminal:${task.id}`;
+    return {
+      label: trayReadyLabel(`${task.kind === "ssh" ? "SSH · " : ""}${task.name || task.id}`, trayActionsInFlight.has(actionKey)),
+      enabled: isOnline && !trayActionsInFlight.has(actionKey),
+      click: () => void performTrayMutation(
+        actionKey,
+        `/api/terminal-tasks/${encodeURIComponent(task.id)}/run`,
+        trayText("执行终端操作失败", "Failed to Run Terminal Action")
+      )
+    };
+  });
+}
+
+function dockerMenu(docker) {
+  if (!docker.available) return [{ label: trayResourceLabel(trayText("Docker CLI 未找到", "Docker CLI Not Found"), false), enabled: false }];
+  if (!docker.daemonOnline) {
+    return docker.appInstalled
+      ? [{
+          label: trayResourceLabel(trayText("Docker Desktop", "Docker Desktop"), false, trayActionsInFlight.has("docker:desktop")),
+          enabled: !trayActionsInFlight.has("docker:desktop"),
+          click: () => void performTrayMutation(
+            "docker:desktop",
+            "/api/docker/desktop/start",
+            trayText("启动 Docker Desktop 失败", "Failed to Start Docker Desktop"),
+            30000
+          )
+        }]
+      : [{ label: trayResourceLabel(trayText("Docker Desktop 未安装", "Docker Desktop Not Installed"), false), enabled: false }];
+  }
+  if (!docker.containers.length) return [{ label: trayText("没有容器", "No Containers"), enabled: false }];
+  return docker.containers.map((container) => {
+    const action = container.running ? "stop" : "start";
+    const actionKey = `docker:${container.id}`;
+    return {
+      label: trayResourceLabel(container.name || container.shortId, Boolean(container.running), trayActionsInFlight.has(actionKey)),
+      enabled: !trayActionsInFlight.has(actionKey),
+      click: () => void performTrayMutation(
+        actionKey,
+        `/api/docker/${encodeURIComponent(container.id)}/${action}`,
+        trayText(
+          `${container.running ? "停止" : "启动"} Docker 容器失败`,
+          `Failed to ${container.running ? "stop" : "start"} Docker Container`
+        ),
+        70000
+      )
+    };
+  });
+}
+
+function trayResourceLabel(name, running, busy = false) {
+  const status = busy
+    ? trayText("处理中 🟡", "Working 🟡")
+    : running
+      ? trayText("已开启 🟢", "On 🟢")
+      : trayText("已关闭 🔴", "Off 🔴");
+  return trayStatusLabel(name, status);
+}
+
+function trayReadyLabel(name, busy = false) {
+  return trayStatusLabel(name, busy ? trayText("执行中 🟡", "Running 🟡") : trayText("就绪 🟢", "Ready 🟢"));
+}
+
+function trayStatusLabel(name, status) {
+  return `${fitTrayColumn(name, TRAY_RESOURCE_NAME_WIDTH)}  ${fitTrayColumn(status, TRAY_STATUS_WIDTH, true)}`;
+}
+
+function trayRouteLabel(name, address) {
+  return `${fitTrayColumn(name, TRAY_ROUTE_COLUMN_WIDTH)}  │  ${fitTrayColumn(address, TRAY_ROUTE_COLUMN_WIDTH)}`;
+}
+
+function fitTrayColumn(value, width, alignRight = false) {
+  const text = truncateTrayText(String(value || ""), width);
+  const padding = "\u2002".repeat(Math.max(0, width - trayTextWidth(text)));
+  return alignRight ? `${padding}${text}` : `${text}${padding}`;
+}
+
+function truncateTrayText(value, width) {
+  if (trayTextWidth(value) <= width) return value;
+  const suffix = "…";
+  let result = "";
+  for (const character of value) {
+    if (trayTextWidth(result + character + suffix) > width) break;
+    result += character;
+  }
+  return `${result}${suffix}`;
+}
+
+function trayTextWidth(value) {
+  let width = 0;
+  for (const character of value) {
+    width += /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/u.test(character) ? 2 : 1;
+  }
+  return width;
+}
+
+function buildTrayPanelState() {
+  const language = traySnapshot?.bootstrap?.config?.settings?.language
+    || readJsonFile(CATALOG_PATH, {}).settings?.language
+    || "zh-CN";
+  const t = (zh, en) => language === "en-US" ? en : zh;
+  const config = traySnapshot?.bootstrap?.config || readJsonFile(CATALOG_PATH, {});
+  const processById = new Map((traySnapshot?.state?.processes || []).map((item) => [item.id, item]));
+  const docker = traySnapshot?.docker || { available: false, appInstalled: false, daemonOnline: false, containers: [] };
+  const services = config.services || [];
+  const tunnels = config.tunnels || [];
+  const terminalTasks = config.terminalTasks || [];
+  const routes = config.routes || [];
+  const containers = docker.containers || [];
+  const runningServices = services.filter((item) => processById.get(item.id)?.status === "running").length;
+  const runningTunnels = tunnels.filter((item) => processById.get(item.id)?.status === "running").length;
+  const runningContainers = containers.filter((item) => item.running).length;
+
+  const managedItems = (definitions, kind) => definitions.map((definition) => {
+    const actionKey = `process:${definition.id}`;
+    const running = processById.get(definition.id)?.status === "running";
+    const busy = trayActionsInFlight.has(actionKey);
+    return {
+      id: definition.id,
+      name: definition.name || definition.id,
+      running,
+      busy,
+      disabled: !isOnline,
+      status: busy ? t("处理中", "Working") : running ? t("已开启", "On") : t("已关闭", "Off"),
+      action: { type: "process", id: definition.id, kind }
+    };
+  });
+
+  let dockerItems = [];
+  if (!docker.available) {
+    dockerItems = [{
+      id: "docker-unavailable",
+      name: t("Docker CLI 未找到", "Docker CLI Not Found"),
+      running: false,
+      busy: false,
+      disabled: true,
+      status: t("不可用", "Unavailable")
+    }];
+  } else if (!docker.daemonOnline) {
+    const busy = trayActionsInFlight.has("docker:desktop");
+    dockerItems = [{
+      id: "docker-desktop",
+      name: docker.appInstalled ? "Docker Desktop" : t("Docker Desktop 未安装", "Docker Desktop Not Installed"),
+      running: false,
+      busy,
+      disabled: !docker.appInstalled,
+      status: busy ? t("启动中", "Starting") : t("已关闭", "Off"),
+      action: docker.appInstalled ? { type: "docker-desktop" } : null
+    }];
+  } else {
+    dockerItems = containers.map((container) => {
+      const actionKey = `docker:${container.id}`;
+      const busy = trayActionsInFlight.has(actionKey);
+      return {
+        id: container.id,
+        name: container.name || container.shortId,
+        running: Boolean(container.running),
+        busy,
+        disabled: false,
+        status: busy ? t("处理中", "Working") : container.running ? t("已开启", "On") : t("已关闭", "Off"),
+        action: { type: "docker", id: container.id }
+      };
+    });
+  }
+
+  const sections = [
+    {
+      id: "services",
+      title: t("服务", "Services"),
+      count: t(`${runningServices}/${services.length} 运行`, `${runningServices}/${services.length} running`),
+      items: managedItems(services, "service")
+    },
+    {
+      id: "tunnels",
+      title: t("SSH 隧道", "SSH Tunnels"),
+      count: t(`${runningTunnels}/${tunnels.length} 运行`, `${runningTunnels}/${tunnels.length} running`),
+      items: managedItems(tunnels, "tunnel")
+    },
+    {
+      id: "terminal",
+      title: t("终端操作", "Terminal Actions"),
+      count: t(`${terminalTasks.length} 项`, `${terminalTasks.length} actions`),
+      items: terminalTasks.map((task) => {
+        const busy = trayActionsInFlight.has(`terminal:${task.id}`);
+        return {
+          id: task.id,
+          name: task.name || task.id,
+          running: isOnline,
+          busy,
+          disabled: !isOnline,
+          status: busy ? t("执行中", "Running") : isOnline ? t("就绪", "Ready") : t("不可用", "Unavailable"),
+          action: { type: "terminal", id: task.id }
+        };
+      })
+    },
+    {
+      id: "docker",
+      title: t("Docker 容器", "Docker Containers"),
+      count: docker.daemonOnline
+        ? t(`${runningContainers}/${containers.length} 运行`, `${runningContainers}/${containers.length} running`)
+        : t("Engine 离线", "Engine offline"),
+      items: dockerItems
+    },
+    {
+      id: "routes",
+      title: t("反向代理", "Reverse Proxy"),
+      count: t(`${routes.filter((item) => item.enabled !== false).length} 个地址`, `${routes.filter((item) => item.enabled !== false).length} routes`),
+      items: routes.map((route) => ({
+        id: route.id,
+        name: route.name || route.id,
+        address: routeHost(route.url),
+        description: route.url,
+        disabled: route.enabled === false || !isSafeExternalUrl(route.url),
+        action: { type: "route", id: route.id }
+      }))
+    }
+  ];
+
+  return {
+    online: isOnline,
+    refreshing: Boolean(trayRefreshPromise),
+    language,
+    labels: {
+      refresh: t("刷新", "Refresh"),
+      showMain: t("控制台", "Console"),
+      openBrowser: t("浏览器", "Browser"),
+      openLogs: t("日志", "Logs"),
+      quitApp: t("退出", "Quit"),
+      offlineTitle: t("后台控制面未连接", "Control Plane Offline"),
+      offlineDetail: t("资源状态暂时不可用，请稍后刷新。", "Resource status is unavailable. Refresh again shortly.")
+    },
+    summary: isOnline
+      ? t(
+          `服务 ${runningServices}/${services.length} · 隧道 ${runningTunnels}/${tunnels.length} · Docker ${runningContainers}/${containers.length}`,
+          `Svc ${runningServices}/${services.length} · SSH ${runningTunnels}/${tunnels.length} · Docker ${runningContainers}/${containers.length}`
+        )
+      : t("后台控制面未连接", "Control plane offline"),
+    sections
+  };
+}
+
+function pushTrayPanelState() {
+  if (!trayPanelWindow || trayPanelWindow.isDestroyed()) return;
+  trayPanelWindow.webContents.send("local-ops:tray-panel-state", buildTrayPanelState());
+}
+
+async function performTrayPanelAction(payload = {}) {
+  const type = String(payload.type || "");
+  const config = traySnapshot?.bootstrap?.config || readJsonFile(CATALOG_PATH, {});
+  const processById = new Map((traySnapshot?.state?.processes || []).map((item) => [item.id, item]));
+
+  if (type === "refresh") {
+    await refreshTraySnapshot(true);
+    return { message: trayText("状态已刷新", "Status refreshed") };
+  }
+  if (type === "show-main") {
+    trayPanelWindow?.hide();
+    showMainWindow();
+    return {};
+  }
+  if (type === "open-browser") {
+    trayPanelWindow?.hide();
+    openSafeExternal(browserUrl());
+    return {};
+  }
+  if (type === "open-logs") {
+    trayPanelWindow?.hide();
+    await shell.openPath(LOG_DIR);
+    return {};
+  }
+  if (type === "quit-app") {
+    trayPanelWindow?.hide();
+    setTimeout(() => {
+      isQuitting = true;
+      app.quit();
+    }, 60);
+    return {};
+  }
+  if (type === "route") {
+    const route = (config.routes || []).find((item) => item.id === String(payload.id || ""));
+    if (!route || route.enabled === false || !isSafeExternalUrl(route.url)) throw new Error("该反向代理地址不可用");
+    trayPanelWindow?.hide();
+    openSafeExternal(route.url);
+    return {};
+  }
+  if (!isOnline) throw new Error(trayText("后台控制面未连接", "Control plane offline"));
+
+  if (type === "process") {
+    const definitions = [...(config.services || []), ...(config.tunnels || [])];
+    const definition = definitions.find((item) => item.id === String(payload.id || ""));
+    if (!definition) throw new Error("没有找到该服务或 SSH 隧道");
+    const running = processById.get(definition.id)?.status === "running";
+    const action = running ? "stop" : "start";
+    await runTrayMutation(
+      `process:${definition.id}`,
+      `/api/processes/${encodeURIComponent(definition.id)}/${action}`
+    );
+    return { message: trayText(`${definition.name || definition.id} 已${running ? "关闭" : "开启"}`, `${definition.name || definition.id} ${running ? "stopped" : "started"}`) };
+  }
+
+  if (type === "terminal") {
+    const task = (config.terminalTasks || []).find((item) => item.id === String(payload.id || ""));
+    if (!task) throw new Error("没有找到该终端操作");
+    await runTrayMutation(`terminal:${task.id}`, `/api/terminal-tasks/${encodeURIComponent(task.id)}/run`);
+    return { message: trayText(`${task.name || task.id} 已交给终端执行`, `${task.name || task.id} sent to terminal`) };
+  }
+
+  if (type === "docker-desktop") {
+    await runTrayMutation("docker:desktop", "/api/docker/desktop/start", 30000);
+    return { message: trayText("正在启动 Docker Desktop", "Starting Docker Desktop") };
+  }
+
+  if (type === "docker") {
+    const container = (traySnapshot?.docker?.containers || []).find((item) => item.id === String(payload.id || ""));
+    if (!container) throw new Error("没有找到该 Docker 容器");
+    const action = container.running ? "stop" : "start";
+    await runTrayMutation(`docker:${container.id}`, `/api/docker/${encodeURIComponent(container.id)}/${action}`, 70000);
+    return { message: trayText(`${container.name || container.shortId} 已${container.running ? "关闭" : "开启"}`, `${container.name || container.shortId} ${container.running ? "stopped" : "started"}`) };
+  }
+
+  throw new Error("不支持的菜单栏操作");
+}
+
+async function performTrayMutation(actionKey, requestPath, errorTitle, timeout = 30000) {
+  try {
+    await runTrayMutation(actionKey, requestPath, timeout);
+  } catch (error) {
+    log(`tray action ${actionKey} failed: ${error.message}`);
+    dialog.showErrorBox(errorTitle, nativeErrorMessage(error.message));
+  }
+}
+
+async function runTrayMutation(actionKey, requestPath, timeout = 30000) {
+  if (trayActionsInFlight.has(actionKey)) return;
+  trayActionsInFlight.add(actionKey);
+  rebuildTrayMenu();
+  try {
+    const bootstrap = await controlRequestJson("/api/bootstrap");
+    await controlRequestJson(requestPath, {
+      method: "POST",
+      headers: { "X-Local-Ops-Token": bootstrap.csrfToken },
+      timeout
+    });
+  } finally {
+    trayActionsInFlight.delete(actionKey);
+    await refreshTraySnapshot(true);
+  }
+}
+
+function refreshTraySnapshot(force = false) {
+  if (!isOnline) return Promise.resolve();
+  if (trayRefreshPromise) return trayRefreshPromise;
+  trayRefreshPromise = (async () => {
+    const suffix = force ? "?fresh=1" : "";
+    const [bootstrap, state, docker] = await Promise.all([
+      controlRequestJson("/api/bootstrap", { timeout: 12000 }),
+      controlRequestJson(`/api/state${suffix}`, { timeout: 25000 }),
+      controlRequestJson(`/api/docker${suffix}`, { timeout: 25000 }).catch((error) => ({
+        available: false,
+        appInstalled: false,
+        daemonOnline: false,
+        containers: [],
+        error: error.message
+      }))
+    ]);
+    traySnapshot = { bootstrap, state, docker, at: Date.now() };
+    configureAboutPanel();
+    createApplicationMenu();
+    if (tray) tray.setToolTip(trayTooltip());
+    rebuildTrayMenu();
+  })().catch((error) => {
+    log(`tray refresh failed: ${error.message}`);
+  }).finally(() => {
+    trayRefreshPromise = null;
+  });
+  return trayRefreshPromise;
+}
+
+function trayTooltip() {
+  if (!isOnline) return `Local Ops · ${trayText("控制面离线", "Control Plane Offline")}`;
+  if (!traySnapshot) return `Local Ops · ${trayText("正在读取资源", "Loading Resources")}`;
+  const config = traySnapshot.bootstrap.config || {};
+  const processById = new Map((traySnapshot.state.processes || []).map((item) => [item.id, item]));
+  const definitions = [...(config.services || []), ...(config.tunnels || [])];
+  const running = definitions.filter((item) => processById.get(item.id)?.status === "running").length;
+  return `Local Ops · ${trayText(`${running}/${definitions.length} 个资源运行中`, `${running}/${definitions.length} resources running`)}`;
+}
+
+function trayText(zh, en) {
+  return desktopLanguage() === "en-US" ? en : zh;
+}
+
+function desktopLanguage() {
+  return traySnapshot?.bootstrap?.config?.settings?.language
+    || readJsonFile(CATALOG_PATH, {}).settings?.language
+    || "zh-CN";
+}
+
+function nativeErrorMessage(value) {
+  const message = String(value || trayText("未知错误", "Unknown error"));
+  if (desktopLanguage() !== "en-US") return message;
+  const exact = new Map([
+    ["后台服务尚未安装，请把 App 放入“应用程序”后重新打开", "The background service is not installed. Move the app to Applications and reopen it."],
+    ["导出配置内容无效或过大", "The exported configuration is invalid or too large."],
+    ["配置文件不能超过 2 MB", "The configuration file must not exceed 2 MB."],
+    ["该操作只能从 Local Ops App 发起", "This operation may be started only from the Local Ops app."],
+    ["无端口访问目前仅支持 macOS", "Portless access is currently supported on macOS only."],
+    ["App 中缺少无端口访问组件，请重新安装 Local Ops", "The app is missing its portless-access component. Reinstall Local Ops."],
+    ["没有找到 Local Ops 配置", "The Local Ops configuration was not found."],
+    ["等待控制面响应超时", "Timed out waiting for the control plane."],
+    ["已取消管理员授权", "Administrator authorization was canceled."],
+    ["本机 80 端口已被其他程序占用", "Local port 80 is already in use by another application."],
+    ["系统规则已经安装，但 80 端口尚未连通", "The system rule was installed, but local port 80 is not reachable yet."],
+    ["App 中缺少后台组件，请重新安装 Local Ops", "The app is missing background components. Reinstall Local Ops."],
+    ["App 中的后台组件清单无效，请重新安装 Local Ops", "The bundled background-component manifest is invalid. Reinstall Local Ops."],
+    ["请先把 Local Ops 拖到“应用程序”文件夹，再从“应用程序”中打开", "Move Local Ops to Applications, then open it from Applications."],
+    ["后台服务注册失败", "Failed to register the background service."],
+    ["后台服务暂时不可用", "The control plane is temporarily unavailable."],
+    ["等待后台控制面启动超时", "Timed out waiting for the control plane to start."],
+    ["该反向代理地址不可用", "This reverse-proxy address is unavailable."],
+    ["没有找到该服务或 SSH 隧道", "The service or SSH tunnel was not found."],
+    ["没有找到该终端操作", "The terminal action was not found."],
+    ["没有找到该 Docker 容器", "The Docker container was not found."],
+    ["不支持的菜单栏操作", "Unsupported menu-bar action."]
+  ]).get(message);
+  if (exact) return exact;
+  let match = message.match(/^App 中缺少后台组件：(.+)$/u);
+  if (match) return `The app is missing a background component: ${match[1]}`;
+  match = message.match(/^控制面请求失败（(\d+)）$/u);
+  if (match) return `Control-plane request failed (${match[1]}).`;
+  match = message.match(/^系统配置失败：(.+)$/u);
+  if (match) return `System configuration failed: ${match[1]}`;
+  return message;
+}
+
+function routeHost(value) {
+  try {
+    const url = new URL(value);
+    const host = url.port ? `${url.hostname}:${url.port}` : url.hostname;
+    const path = url.pathname === "/" ? "" : url.pathname;
+    return `${host}${path}${url.search}${url.hash}`;
+  } catch {
+    return value || "";
+  }
 }
 
 async function connectControlPlane() {
@@ -266,7 +982,7 @@ async function ensureControlPlane(forceBootstrap = false) {
 
 async function restartControlPlane() {
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
-  await mainWindow.loadFile(path.join(__dirname, "splash.html"));
+  await mainWindow.loadFile(path.join(__dirname, "splash.html"), { query: { lang: desktopLanguage() } });
   showMainWindow();
   try {
     const installResult = await ensureBundledBackend();
@@ -285,7 +1001,7 @@ async function restartControlPlane() {
   } catch (error) {
     updateTray(false);
     await showOffline(error.message);
-    dialog.showErrorBox("后台重启失败", error.message);
+    dialog.showErrorBox(trayText("后台重启失败", "Failed to Restart the Control Plane"), nativeErrorMessage(error.message));
   }
 }
 
@@ -298,6 +1014,18 @@ function ensureBundledBackend() {
 }
 
 function configureIpc() {
+  ipcMain.handle("local-ops:tray-panel-state", async (event) => {
+    assertTrustedRenderer(event);
+    return buildTrayPanelState();
+  });
+  ipcMain.handle("local-ops:tray-panel-action", async (event, payload = {}) => {
+    assertTrustedRenderer(event);
+    return performTrayPanelAction(payload);
+  });
+  ipcMain.on("local-ops:tray-panel-close", (event) => {
+    assertTrustedRenderer(event);
+    trayPanelWindow?.hide();
+  });
   ipcMain.handle("local-ops:portless-status", async (event) => {
     assertTrustedRenderer(event);
     return getPortlessStatus();
@@ -323,10 +1051,10 @@ function configureIpc() {
       ? String(payload.suggestedName)
       : "local-ops-config.json";
     const result = await dialog.showSaveDialog(mainWindow, {
-      title: "导出 Local Ops 配置",
+      title: trayText("导出 Local Ops 配置", "Export Local Ops Configuration"),
       defaultPath: path.join(app.getPath("documents"), suggestedName),
-      buttonLabel: "导出配置",
-      filters: [{ name: "JSON 配置", extensions: ["json"] }]
+      buttonLabel: trayText("导出配置", "Export"),
+      filters: [{ name: trayText("JSON 配置", "JSON Configuration"), extensions: ["json"] }]
     });
     if (result.canceled || !result.filePath) return { canceled: true };
     fs.writeFileSync(result.filePath, content, { encoding: "utf8", mode: 0o600 });
@@ -335,10 +1063,10 @@ function configureIpc() {
   ipcMain.handle("local-ops:open-config-file", async (event) => {
     assertTrustedRenderer(event);
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: "导入 Local Ops 配置",
-      buttonLabel: "选择配置",
+      title: trayText("导入 Local Ops 配置", "Import Local Ops Configuration"),
+      buttonLabel: trayText("选择配置", "Choose Configuration"),
       properties: ["openFile"],
-      filters: [{ name: "JSON 配置", extensions: ["json"] }]
+      filters: [{ name: trayText("JSON 配置", "JSON Configuration"), extensions: ["json"] }]
     });
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
     const file = result.filePaths[0];
@@ -349,7 +1077,7 @@ function configureIpc() {
 
 function assertTrustedRenderer(event) {
   const senderUrl = event.senderFrame?.url || event.sender?.getURL?.() || "";
-  if (!isAllowedAppUrl(senderUrl)) throw new Error("该操作只能从 Local Ops App 发起");
+  if (!isAllowedAppUrl(senderUrl) && !isAllowedBundledFile(senderUrl)) throw new Error("该操作只能从 Local Ops App 发起");
 }
 
 function getLoginItemStatus() {
@@ -385,7 +1113,33 @@ async function applyAppStartupActionsOnce() {
     if (result.errors?.length) log(`app startup action warnings: ${result.errors.join(" | ")}`);
   } catch (error) {
     log(`app startup actions failed: ${error.message}`);
+  } finally {
+    startSessionCaptureMonitor();
   }
+}
+
+function startSessionCaptureMonitor() {
+  clearInterval(sessionCaptureTimer);
+  void captureSessionState();
+  sessionCaptureTimer = setInterval(() => void captureSessionState(), 30000);
+}
+
+function captureSessionState() {
+  if (!isOnline) return Promise.resolve();
+  if (sessionCapturePromise) return sessionCapturePromise;
+  sessionCapturePromise = (async () => {
+    const bootstrap = await controlRequestJson("/api/bootstrap", { timeout: 4000 });
+    await controlRequestJson("/api/session/capture", {
+      method: "POST",
+      headers: { "X-Local-Ops-Token": bootstrap.csrfToken },
+      timeout: 30000
+    });
+  })().catch((error) => {
+    log(`session state capture failed: ${error.message}`);
+  }).finally(() => {
+    sessionCapturePromise = null;
+  });
+  return sessionCapturePromise;
 }
 
 async function getPortlessStatus() {
@@ -544,10 +1298,10 @@ async function maybeOfferPortlessAccess() {
   fs.writeFileSync(PORTLESS_PROMPT_MARKER, `${new Date().toISOString()}\n`, { mode: 0o600 });
   const result = await dialog.showMessageBox(mainWindow, {
     type: "info",
-    title: "启用无端口访问",
-    message: "是否隐藏本地域名后的 :19080？",
-    detail: "启用后可直接访问 http://openclaw.localhost。macOS 会要求输入一次管理员密码，转发仅作用于本机。",
-    buttons: ["启用无端口访问", "稍后在设置中启用"],
+    title: trayText("启用无端口访问", "Enable Portless Access"),
+    message: trayText("是否隐藏本地域名后的 :19080？", "Hide :19080 from local domain addresses?"),
+    detail: trayText("启用后可直接访问 http://openclaw.localhost。macOS 会要求输入一次管理员密码，转发仅作用于本机。", "After enabling, use addresses such as http://openclaw.localhost directly. macOS will ask for an administrator password once; forwarding remains local to this Mac."),
+    buttons: [trayText("启用无端口访问", "Enable Portless Access"), trayText("稍后在设置中启用", "Enable Later in Settings")],
     defaultId: 0,
     cancelId: 1,
     noLink: true
@@ -560,14 +1314,14 @@ async function maybeOfferPortlessAccess() {
     if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.webContents.reload();
     await dialog.showMessageBox(mainWindow, {
       type: "info",
-      title: "无端口访问已启用",
-      message: "现在可以直接使用 .localhost 域名",
-      detail: "例如：http://openclaw.localhost",
-      buttons: ["完成"]
+      title: trayText("无端口访问已启用", "Portless Access Enabled"),
+      message: trayText("现在可以直接使用 .localhost 域名", ".localhost domains are ready to use"),
+      detail: trayText("例如：http://openclaw.localhost", "Example: http://openclaw.localhost"),
+      buttons: [trayText("完成", "Done")]
     });
   } catch (error) {
     if (error.message === "已取消管理员授权") return;
-    dialog.showErrorBox("无端口访问启用失败", error.message);
+    dialog.showErrorBox(trayText("无端口访问启用失败", "Failed to Enable Portless Access"), nativeErrorMessage(error.message));
   }
 }
 
@@ -649,6 +1403,7 @@ function syncBundledFiles(bundleDir, ownedItems) {
 
   fs.chmodSync(path.join(INSTALL_DIR, "bin", "caddy"), 0o755);
   fs.chmodSync(path.join(INSTALL_DIR, "bin", "process-compose"), 0o755);
+  fs.chmodSync(path.join(INSTALL_DIR, "bin", "local-ops-keychain"), 0o755);
   for (const script of fs.readdirSync(path.join(INSTALL_DIR, "scripts"))) {
     if (script.endsWith(".zsh")) fs.chmodSync(path.join(INSTALL_DIR, "scripts", script), 0o755);
   }
@@ -726,6 +1481,10 @@ function renderLaunchAgent() {
     <string>${processCompose}</string>
     <key>LOCAL_OPS_CADDY</key>
     <string>${caddy}</string>
+    <key>LOCAL_OPS_KEYCHAIN_HELPER</key>
+    <string>${root}/bin/local-ops-keychain</string>
+    <key>LOCAL_OPS_SSH_ASKPASS</key>
+    <string>${root}/scripts/local-ops-ssh-askpass.zsh</string>
   </dict>
   <key>StandardOutPath</key>
   <string>${root}/runtime/launchd.out.log</string>
@@ -747,7 +1506,9 @@ async function renderInstalledConfig() {
       LOCAL_OPS_HOME: INSTALL_DIR,
       LOCAL_OPS_NODE: nodeExecutable,
       LOCAL_OPS_PROCESS_COMPOSE: path.join(INSTALL_DIR, "bin", "process-compose"),
-      LOCAL_OPS_CADDY: path.join(INSTALL_DIR, "bin", "caddy")
+      LOCAL_OPS_CADDY: path.join(INSTALL_DIR, "bin", "caddy"),
+      LOCAL_OPS_KEYCHAIN_HELPER: path.join(INSTALL_DIR, "bin", "local-ops-keychain"),
+      LOCAL_OPS_SSH_ASKPASS: path.join(INSTALL_DIR, "scripts", "local-ops-ssh-askpass.zsh")
     }
   });
   if (stdout.trim()) log(stdout.trim());
@@ -827,7 +1588,10 @@ async function loadConsole() {
 async function showOffline(message) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   await mainWindow.loadFile(path.join(__dirname, "offline.html"), {
-    query: { reason: String(message || "后台服务暂时不可用").slice(0, 240) }
+    query: {
+      lang: desktopLanguage(),
+      reason: nativeErrorMessage(message || trayText("后台服务暂时不可用", "The control plane is temporarily unavailable")).slice(0, 240)
+    }
   });
   showMainWindow();
 }
@@ -839,6 +1603,7 @@ function scheduleReconnect(delay = 2000) {
     if (await checkHealth()) {
       await loadConsole();
       updateTray(true);
+      void applyAppStartupActionsOnce();
     } else {
       updateTray(false);
       scheduleReconnect(2500);
@@ -855,6 +1620,7 @@ function startHealthMonitor() {
       log(`health changed: ${online ? "online" : "offline"}`);
       if (online && mainWindow && mainWindow.webContents.getURL().startsWith("file:")) await loadConsole();
     }
+    if (online) void refreshTraySnapshot();
   }, 10000);
 }
 
@@ -918,7 +1684,7 @@ function isSafeExternalUrl(value) {
 function isAllowedBundledFile(value) {
   try {
     const file = path.normalize(new URL(value).pathname);
-    return ["splash.html", "offline.html"].some((name) => file.endsWith(path.sep + name));
+    return ["splash.html", "offline.html", "tray.html"].some((name) => file.endsWith(path.sep + name));
   } catch {
     return false;
   }
@@ -931,6 +1697,7 @@ function openSafeExternal(value) {
 function clearTimers() {
   clearTimeout(reconnectTimer);
   clearInterval(healthTimer);
+  clearInterval(sessionCaptureTimer);
 }
 
 function log(message) {

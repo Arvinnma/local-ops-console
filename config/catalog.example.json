@@ -8,9 +8,7 @@
     "proxyPort": 19080,
     "publicProxyPort": 19080,
     "launchAppAtLogin": false,
-    "startServicesOnAppLaunch": false,
-    "startTunnelsOnAppLaunch": false,
-    "startDockerOnAppLaunch": false,
+    "restoreLastSessionOnAppLaunch": false,
     "language": "zh-CN"
   },
   "services": [],

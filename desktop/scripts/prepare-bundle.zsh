@@ -39,7 +39,8 @@ command cp "$REPO_ROOT/THIRD_PARTY_NOTICES.md" "$STAGE_ROOT/THIRD_PARTY_NOTICES.
 command cp "$REPO_ROOT/THIRD_PARTY_LICENSES/Apache-2.0.txt" "$STAGE_ROOT/licenses/Apache-2.0.txt"
 command cp -L "$CADDY_BIN" "$STAGE_ROOT/bin/caddy"
 command cp -L "$PROCESS_COMPOSE_BIN" "$STAGE_ROOT/bin/process-compose"
-command chmod 755 "$STAGE_ROOT/bin/caddy" "$STAGE_ROOT/bin/process-compose" "$STAGE_ROOT/scripts/"*.zsh
+"$REPO_ROOT/scripts/build-keychain-helper.zsh" "$STAGE_ROOT/bin/local-ops-keychain"
+command chmod 755 "$STAGE_ROOT/bin/caddy" "$STAGE_ROOT/bin/process-compose" "$STAGE_ROOT/bin/local-ops-keychain" "$STAGE_ROOT/scripts/"*.zsh
 /usr/bin/xattr -cr "$STAGE_ROOT" >/dev/null 2>&1 || true
 
 APP_VERSION="$(cd "$DESKTOP_ROOT" && "$NODE_BIN" -p 'require("./package.json").version')"
@@ -59,7 +60,8 @@ PROCESS_COMPOSE_VERSION="$PROCESS_COMPOSE_VERSION" \
     builtAt: new Date().toISOString(),
     components: {
       caddy: process.env.CADDY_VERSION,
-      processCompose: process.env.PROCESS_COMPOSE_VERSION
+      processCompose: process.env.PROCESS_COMPOSE_VERSION,
+      keychainHelper: "Security.framework"
     }
   };
   fs.writeFileSync(

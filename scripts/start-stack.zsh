@@ -26,6 +26,8 @@ export PATH="$ROOT/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:
 export LOCAL_OPS_NODE="$NODE_BIN"
 export LOCAL_OPS_PROCESS_COMPOSE="$PROCESS_COMPOSE_BIN"
 export LOCAL_OPS_CADDY="${LOCAL_OPS_CADDY:-$ROOT/bin/caddy}"
+export LOCAL_OPS_KEYCHAIN_HELPER="${LOCAL_OPS_KEYCHAIN_HELPER:-$ROOT/bin/local-ops-keychain}"
+export LOCAL_OPS_SSH_ASKPASS="${LOCAL_OPS_SSH_ASKPASS:-$ROOT/scripts/local-ops-ssh-askpass.zsh}"
 export NO_PROXY="${NO_PROXY:-},127.0.0.1,localhost,.localhost,::1"
 export no_proxy="$NO_PROXY"
 

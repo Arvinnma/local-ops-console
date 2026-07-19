@@ -18,24 +18,30 @@ export const BINARIES = {
   caddy: findBinary("caddy"),
   node: process.env.LOCAL_OPS_NODE || process.execPath,
   ssh: "/usr/bin/ssh",
-  docker: findBinary("docker", ["/Applications/Docker.app/Contents/Resources/bin/docker"])
+  docker: findBinary("docker", ["/Applications/Docker.app/Contents/Resources/bin/docker"]),
+  keychain: process.env.LOCAL_OPS_KEYCHAIN_HELPER || findBinary("local-ops-keychain")
 };
+
+export const SSH_ASKPASS_PATH = process.env.LOCAL_OPS_SSH_ASKPASS
+  || path.join(ROOT, "scripts", "local-ops-ssh-askpass.zsh");
 
 export const PORTABLE_CONFIG_FORMAT = "local-ops-portable-config";
 export const PORTABLE_CONFIG_VERSION = 1;
 
 const PORTABLE_BOOLEAN_SETTING_KEYS = [
   "launchAppAtLogin",
+  "restoreLastSessionOnAppLaunch"
+];
+
+const LEGACY_STARTUP_SETTING_KEYS = [
   "startServicesOnAppLaunch",
-  "startTunnelsOnAppLaunch"
+  "startTunnelsOnAppLaunch",
+  "startDockerOnAppLaunch"
 ];
 
 const SUPPORTED_LANGUAGES = new Set(["zh-CN", "en-US"]);
 
-const STARTUP_SETTING_KEYS = [
-  ...PORTABLE_BOOLEAN_SETTING_KEYS,
-  "startDockerOnAppLaunch"
-];
+const STARTUP_SETTING_KEYS = [...PORTABLE_BOOLEAN_SETTING_KEYS];
 
 export const SYSTEM_PROCESS_DEFINITIONS = [
   {
@@ -95,10 +101,10 @@ export function createPortableConfigExport(catalog, exportedAt = new Date().toIS
         language: normalizeLanguage(catalog.settings.language)
       },
       services: structuredClone(catalog.services.filter((item) => item.kind !== "docker")),
-      tunnels: structuredClone(catalog.tunnels),
+      tunnels: catalog.tunnels.map(stripPassphraseReference),
       externalServices: structuredClone(catalog.externalServices),
       routes: structuredClone(catalog.routes.filter((item) => !item.system)),
-      terminalTasks: structuredClone(catalog.terminalTasks)
+      terminalTasks: catalog.terminalTasks.map(stripPassphraseReference)
     }
   };
 }
@@ -118,9 +124,12 @@ export function applyPortableConfigImport(document, currentCatalog) {
   if (!source.settings || typeof source.settings !== "object" || Array.isArray(source.settings)) {
     throw new Error("配置文件缺少启动设置");
   }
-  for (const key of PORTABLE_BOOLEAN_SETTING_KEYS) {
-    if (typeof source.settings[key] !== "boolean") throw new Error(`配置项 ${key} 必须是布尔值`);
+  if (typeof source.settings.launchAppAtLogin !== "boolean") {
+    throw new Error("配置项 launchAppAtLogin 必须是布尔值");
   }
+  const restoreLastSessionOnAppLaunch = typeof source.settings.restoreLastSessionOnAppLaunch === "boolean"
+    ? source.settings.restoreLastSessionOnAppLaunch
+    : LEGACY_STARTUP_SETTING_KEYS.some((key) => source.settings[key] === true);
   if (source.settings.language !== undefined && !SUPPORTED_LANGUAGES.has(source.settings.language)) {
     throw new Error(`不支持的界面语言：${source.settings.language}`);
   }
@@ -129,20 +138,21 @@ export function applyPortableConfigImport(document, currentCatalog) {
   }
 
   const next = structuredClone(currentCatalog);
-  for (const key of PORTABLE_BOOLEAN_SETTING_KEYS) next.settings[key] = source.settings[key];
+  next.settings.launchAppAtLogin = source.settings.launchAppAtLogin;
+  next.settings.restoreLastSessionOnAppLaunch = restoreLastSessionOnAppLaunch;
   next.settings.language = normalizeLanguage(source.settings.language || next.settings.language);
   const localDockerServices = next.services.filter((item) => item.kind === "docker");
   next.services = [
     ...source.services.filter((item) => item?.kind !== "docker").map((item) => normalizeService(item)),
     ...localDockerServices
   ];
-  next.tunnels = source.tunnels.map((item) => normalizeTunnel(item));
+  next.tunnels = source.tunnels.map((item) => normalizeTunnel({ ...item, passphraseRef: "" }));
   next.externalServices = source.externalServices.map((item) => normalizeExternalService(item));
   next.routes = [
     ...next.routes.filter((item) => item.system),
     ...source.routes.filter((item) => !item?.system).map((item) => normalizeRoute(item))
   ];
-  next.terminalTasks = source.terminalTasks.map((item) => normalizeTerminalTask(item));
+  next.terminalTasks = source.terminalTasks.map((item) => normalizeTerminalTask({ ...item, passphraseRef: "" }));
   validateCatalog(next);
   return next;
 }
@@ -218,6 +228,7 @@ export function validateCatalog(catalog) {
     if (tunnel.identityFile && !path.isAbsolute(tunnel.identityFile)) {
       throw new Error("SSH 密钥路径必须是绝对路径");
     }
+    assertSecretReference(tunnel.passphraseRef);
   }
 
   for (const item of catalog.externalServices) {
@@ -238,6 +249,7 @@ export function validateCatalog(catalog) {
     assertText(route.name, "域名名称", 80);
     assertIcon(route.icon);
     assertLocalhostDomain(route.host);
+    assertRoutePath(route.path);
     if (routeHosts.has(route.host)) throw new Error(`域名重复：${route.host}`);
     routeHosts.add(route.host);
     assertLocalTarget(route.target);
@@ -260,6 +272,7 @@ export function validateCatalog(catalog) {
       assertSafeUser(task.sshUser);
       assertPort(task.sshPort, "SSH 端口");
       if (task.identityFile && !path.isAbsolute(task.identityFile)) throw new Error("SSH 密钥路径必须是绝对路径");
+      assertSecretReference(task.passphraseRef);
       const hasLocalPort = task.localPort !== null;
       const hasRemotePort = task.remotePort !== null;
       if (hasLocalPort !== hasRemotePort) throw new Error("终端 SSH 转发必须同时填写本地端口和远端端口");
@@ -307,6 +320,7 @@ export function normalizeTunnel(input) {
     remotePort: Number(input.remotePort),
     bindAddress: "127.0.0.1",
     identityFile: normalizeHomePath(input.identityFile),
+    passphraseRef: normalizeSecretReference(input.passphraseRef),
     autoStart: Boolean(input.autoStart)
   };
   validateCatalog(validationCatalog({ tunnels: [tunnel] }));
@@ -314,11 +328,13 @@ export function normalizeTunnel(input) {
 }
 
 export function normalizeRoute(input) {
+  const address = normalizeRouteAddress(input.host, input.path);
   const route = {
-    id: normalizeId(input.id || input.name || input.host),
+    id: normalizeId(input.id || input.name || address.host),
     name: String(input.name || "").trim(),
     icon: normalizeIconId(input.icon, inferIcon(input, "link")),
-    host: String(input.host || "").trim().toLowerCase(),
+    host: address.host,
+    path: address.path,
     target: String(input.target || "").trim(),
     enabled: input.enabled !== false,
     system: false
@@ -344,6 +360,7 @@ export function normalizeTerminalTask(input) {
     sshUser: kind === "ssh" ? String(input.sshUser || "").trim() : "",
     sshPort: kind === "ssh" ? Number(input.sshPort || 22) : 22,
     identityFile: kind === "ssh" ? normalizeHomePath(input.identityFile) : "",
+    passphraseRef: kind === "ssh" ? normalizeSecretReference(input.passphraseRef) : "",
     localPort: kind === "ssh" ? localPort : null,
     remoteHost: kind === "ssh" ? String(input.remoteHost || "127.0.0.1").trim() : "127.0.0.1",
     remotePort: kind === "ssh" ? remotePort : null
@@ -374,11 +391,56 @@ export function processDefinitions(catalog) {
 export function routeUrl(catalog, route) {
   const port = publicProxyPort(catalog);
   const suffix = port === 80 ? "" : `:${port}`;
-  return `http://${route.host}${suffix}`;
+  return `http://${route.host}${suffix}${route.path || ""}`;
 }
 
 export function publicProxyPort(catalog) {
   return Number(catalog.settings.publicProxyPort || catalog.settings.proxyPort);
+}
+
+export function renderSshCommand(inputArgs, passphraseRef = "", background = false) {
+  const args = [...inputArgs];
+  const reference = normalizeSecretReference(passphraseRef);
+  if (background && !reference) {
+    args.splice(Math.max(0, args.length - 1), 0, "-o", "BatchMode=yes");
+  }
+  if (!reference) return `exec ${args.map(shellQuote).join(" ")}`;
+
+  args.splice(Math.max(0, args.length - 1), 0,
+    "-o", "PreferredAuthentications=publickey",
+    "-o", "PasswordAuthentication=no",
+    "-o", "KbdInteractiveAuthentication=no");
+  const environment = [
+    "/usr/bin/env",
+    `SSH_ASKPASS=${SSH_ASKPASS_PATH}`,
+    "SSH_ASKPASS_REQUIRE=force",
+    "DISPLAY=local-ops:0",
+    "LC_ALL=C",
+    `LOCAL_OPS_KEYCHAIN_HELPER=${BINARIES.keychain}`,
+    `LOCAL_OPS_KEYCHAIN_ACCOUNT=${reference}`
+  ];
+  return `exec ${[...environment, ...args].map(shellQuote).join(" ")}`;
+}
+
+export function buildTerminalAppleScript(terminalApp, command) {
+  const encoded = JSON.stringify(String(command || ""));
+  if (terminalApp === "iterm2") {
+    return [
+      'tell application id "com.googlecode.iterm2"',
+      "activate",
+      "if (count of windows) = 0 then create window with default profile",
+      "tell current session of current window",
+      `write text ${encoded}`,
+      "end tell",
+      "end tell"
+    ].join("\n");
+  }
+  return [
+    'tell application "Terminal"',
+    "activate",
+    `do script ${encoded}`,
+    "end tell"
+  ].join("\n");
 }
 
 function renderProcessCompose(catalog) {
@@ -481,11 +543,12 @@ function renderWorkerCompose(catalog) {
       `${tunnel.sshUser}@${tunnel.sshHost}`
     );
     appendProcess(lines, tunnel.id, {
-      command: `exec ${args.map(shellQuote).join(" ")}`,
+      command: renderSshCommand(args, tunnel.passphraseRef, true),
       workingDir: ROOT,
       namespace: "tunnels",
       description: tunnel.description || tunnel.name,
       restart: "always",
+      backoffSeconds: 10,
       disabled: !tunnel.autoStart
     });
   }
@@ -502,7 +565,7 @@ function appendProcess(lines, id, definition) {
   lines.push('    disable_ansi_colors: true');
   lines.push('    availability:');
   lines.push(`      restart: ${yamlString(definition.restart || "no")}`);
-  lines.push('      backoff_seconds: 2');
+  lines.push(`      backoff_seconds: ${Number(definition.backoffSeconds || 2)}`);
   if (definition.dependsOn) {
     lines.push('    depends_on:');
     lines.push(`      ${definition.dependsOn}:`);
@@ -636,6 +699,50 @@ function assertLocalhostDomain(value) {
   }
 }
 
+function assertRoutePath(value) {
+  normalizeRoutePath(value);
+}
+
+function normalizeRouteAddress(hostValue, pathValue) {
+  const raw = String(hostValue || "").trim();
+  let host = raw;
+  let embeddedPath = "";
+
+  if (/^https?:\/\//i.test(raw)) {
+    let parsed;
+    try { parsed = new URL(raw); } catch { throw new Error("本地域名或访问路径格式无效"); }
+    if (parsed.port) throw new Error("本地域名不能包含端口");
+    host = parsed.hostname;
+    embeddedPath = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } else {
+    const slashIndex = raw.indexOf("/");
+    if (slashIndex >= 0) {
+      host = raw.slice(0, slashIndex);
+      embeddedPath = raw.slice(slashIndex);
+    }
+  }
+
+  return {
+    host: host.trim().toLowerCase(),
+    path: normalizeRoutePath(pathValue === undefined ? embeddedPath : pathValue)
+  };
+}
+
+function normalizeRoutePath(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "/") return "";
+  const candidate = raw.startsWith("/") ? raw : `/${raw}`;
+  if (candidate.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(candidate)) {
+    throw new Error("访问路径必须是以 / 开头的有效路径");
+  }
+  let parsed;
+  try { parsed = new URL(candidate, "http://route.localhost"); } catch {
+    throw new Error("访问路径格式无效");
+  }
+  if (parsed.origin !== "http://route.localhost") throw new Error("访问路径格式无效");
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
 function assertSafeHost(value, label) {
   if (!/^[a-zA-Z0-9._:-]+$/.test(String(value || ""))) throw new Error(`${label} 格式无效`);
 }
@@ -646,6 +753,25 @@ function assertSafeUser(value) {
 
 function assertIcon(value) {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(String(value || ""))) throw new Error("资源图标格式无效");
+}
+
+function assertSecretReference(value) {
+  if (!value) return;
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(String(value))) {
+    throw new Error("SSH 私钥口令引用无效");
+  }
+}
+
+function normalizeSecretReference(value) {
+  const reference = String(value || "").trim().toLowerCase();
+  assertSecretReference(reference);
+  return reference;
+}
+
+function stripPassphraseReference(item) {
+  const portable = structuredClone(item);
+  delete portable.passphraseRef;
+  return portable;
 }
 
 function normalizeIconId(value, fallback = "server") {
@@ -676,6 +802,10 @@ function migrateCatalog(input) {
   const catalog = structuredClone(input || {});
   catalog.version = catalog.version || 1;
   catalog.settings = catalog.settings || {};
+  if (typeof catalog.settings.restoreLastSessionOnAppLaunch !== "boolean") {
+    catalog.settings.restoreLastSessionOnAppLaunch = LEGACY_STARTUP_SETTING_KEYS.some((key) => catalog.settings[key] === true);
+  }
+  for (const key of LEGACY_STARTUP_SETTING_KEYS) delete catalog.settings[key];
   for (const key of STARTUP_SETTING_KEYS) {
     if (typeof catalog.settings[key] !== "boolean") catalog.settings[key] = false;
   }
@@ -702,9 +832,7 @@ function validationCatalog(overrides = {}) {
       caddyAdminPort: 3,
       proxyPort: 4,
       launchAppAtLogin: false,
-      startServicesOnAppLaunch: false,
-      startTunnelsOnAppLaunch: false,
-      startDockerOnAppLaunch: false,
+      restoreLastSessionOnAppLaunch: false,
       language: "zh-CN"
     },
     services: [],
