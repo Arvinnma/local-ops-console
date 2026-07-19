@@ -125,12 +125,18 @@ test("normalizes terminal command and SSH tasks", () => {
   assert.equal(ssh.icon, "ssh");
 });
 
-test("generates compilable AppleScript for Terminal and iTerm2 without quote injection", () => {
+test("generates safe AppleScript for Terminal and iTerm2 without quote injection", () => {
   const command = `printf '%s\\n' "quoted value"; printf '\\\\done'`;
   for (const terminalApp of ["terminal", "iterm2"]) {
-    if (terminalApp === "iterm2" && !fs.existsSync("/Applications/iTerm.app")) continue;
     const script = buildTerminalAppleScript(terminalApp, command);
     assert.match(script, terminalApp === "iterm2" ? /write text/ : /do script/);
+
+    // osacompile is only available on macOS. Keep the script-generation and
+    // escaping assertions cross-platform, then add a native compilation check
+    // whenever the matching macOS application is available.
+    if (process.platform !== "darwin") continue;
+    if (terminalApp === "iterm2" && !fs.existsSync("/Applications/iTerm.app")) continue;
+
     const output = path.join(os.tmpdir(), `local-ops-applescript-${terminalApp}-${process.pid}.scpt`);
     try {
       execFileSync("/usr/bin/osacompile", ["-o", output, "-e", script], { stdio: "pipe" });
