@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "settings": {
+    "consolePort": 19090,
+    "processComposePort": 19091,
+    "workerComposePort": 19093,
+    "caddyAdminPort": 19092,
+    "proxyPort": 19080,
+    "publicProxyPort": 19080,
+    "launchAppAtLogin": false,
+    "startServicesOnAppLaunch": false,
+    "startTunnelsOnAppLaunch": false,
+    "startDockerOnAppLaunch": false,
+    "language": "zh-CN"
+  },
+  "services": [],
+  "tunnels": [],
+  "externalServices": [],
+  "terminalTasks": [],
+  "routes": [
+    {
+      "id": "console",
+      "name": "Local Ops 控制台",
+      "host": "console.localhost",
+      "target": "127.0.0.1:19090",
+      "enabled": true,
+      "system": true
+    }
+  ]
+}

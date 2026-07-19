@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+if /usr/sbin/lsof -nP -iTCP:80 -sTCP:LISTEN 2>/dev/null | /usr/bin/grep -q LISTEN; then
+  echo "port 80 is already in use" >&2
+  exit 69
+fi
+
+if ! /sbin/pfctl -s info 2>/dev/null | /usr/bin/grep -q '^Status: Enabled'; then
+  /sbin/pfctl -e >/dev/null
+fi
+
+/sbin/pfctl -a com.apple/local-ops -f /etc/pf.anchors/com.arvin.localops

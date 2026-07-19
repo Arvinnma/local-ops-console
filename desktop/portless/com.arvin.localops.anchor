@@ -1,0 +1,2 @@
+rdr pass on lo0 inet proto tcp from any to 127.0.0.1 port 80 -> 127.0.0.1 port 19080
+rdr pass on lo0 inet6 proto tcp from any to ::1 port 80 -> ::1 port 19080

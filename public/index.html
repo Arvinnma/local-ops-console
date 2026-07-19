@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#f4f7f5">
+    <title>Local Ops · 本机服务控制台</title>
+    <meta name="description" content="管理本机服务、SSH 隧道、Docker、终端任务和反向代理域名">
+    <link rel="stylesheet" href="/styles.css?v=1.7.0">
+    <script type="module" src="/app.js?v=1.7.0"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#overview" aria-label="Local Ops 首页">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span><strong>Local Ops</strong><small>本机服务控制台</small></span>
+        </a>
+
+        <p class="nav-label">工作台</p>
+        <nav class="main-nav" aria-label="主导航">
+          <button class="nav-item active" data-view="overview"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"/></svg><span>总览</span></button>
+          <button class="nav-item" data-view="services"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h14a1 1 0 0 1 1 1v4H4V5a1 1 0 0 1 1-1Zm-1 7h16v4H4v-4Zm0 6h16v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2Zm3-10h2V6H7v1Zm0 6h2v-1H7v1Zm0 6h2v-1H7v1Z"/></svg><span>服务</span></button>
+          <button class="nav-item" data-view="tunnels"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7.5 6.5h7.3l-2.1-2.1L14.1 3 18.6 7.5 14.1 12l-1.4-1.4 2.1-2.1H7.5a3 3 0 0 0-3 3v1h-2v-1a5 5 0 0 1 5-5Zm9 11h-7.3l2.1 2.1L9.9 21l-4.5-4.5L9.9 12l1.4 1.4-2.1 2.1h7.3a3 3 0 0 0 3-3v-1h2v1a5 5 0 0 1-5 5Z"/></svg><span>SSH 隧道</span></button>
+          <button class="nav-item" data-view="routes"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14 4h6v6h-2V7.4l-7.3 7.3-1.4-1.4L16.6 6H14V4ZM5 6h6v2H6v10h10v-5h2v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z"/></svg><span>反向代理</span></button>
+          <button class="nav-item" data-view="docker"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 10h3v3H4v-3Zm4 0h3v3H8v-3Zm4 0h3v3h-3v-3Zm-4-4h3v3H8V6Zm4 0h3v3h-3V6Zm0-4h3v3h-3V2Zm4 8h3v3h-3v-3Zm5-1.5c-.7-.4-1.5-.5-2.3-.2-.2-1.3-1-2.4-2.2-3l-.5-.2-.3.5c-.4.7-.5 1.6-.2 2.4.2.5.5.9.9 1.2-.7.4-1.7.8-3.2.8H2.3l-.1.6c-.2 1.8.1 3.7.9 5.3.9 1.8 2.3 3 4.2 3.6 1.1.4 2.3.5 3.4.5 3.3 0 6-1.2 7.8-3.5 1.3-1.6 2-3.6 2.3-5.5.8 0 1.7-.3 2.3-.8l.4-.4-.4-.4c-.5-.6-1.3-1-2.1-1.1Z"/></svg><span>Docker</span></button>
+          <button class="nav-item" data-view="terminal"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 4h18a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm1 3v11h16V7H4Zm2 2 3 3-3 3-1.4-1.4L6.2 12l-1.6-1.6L6 9Zm5 5h5v2h-5v-2Z"/></svg><span>终端</span></button>
+          <button class="nav-item" data-view="settings"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10.9 2h2.2l.5 2.1c.5.2 1 .5 1.5.8l2-.7 1.6 1.6-.7 2c.3.5.6 1 .8 1.5l2.2.6v2.2l-2.1.5c-.2.5-.5 1-.8 1.5l.7 2-1.6 1.6-2-.7c-.5.3-1 .6-1.5.8l-.6 2.2h-2.2l-.5-2.1c-.5-.2-1-.5-1.5-.8l-2 .7-1.6-1.6.7-2c-.3-.5-.6-1-.8-1.5L3 13.1v-2.2l2.1-.5c.2-.5.5-1 .8-1.5l-.7-2 1.6-1.6 2 .7c.5-.3 1-.6 1.5-.8L10.9 2Zm1.1 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg><span>设置</span></button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="connection-state">
+            <span class="pulse-dot" id="sidebar-dot"></span>
+            <span><strong id="sidebar-status">正在连接</strong><small>Process Compose</small></span>
+          </div>
+          <p><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2 5 5v6c0 4.7 3 9 7 11 4-2 7-6.3 7-11V5l-7-3Zm0 2.2L17 6v5c0 3.6-2.1 7-5 8.7C9.1 18 7 14.6 7 11V6l5-1.8Z"/></svg>仅限本机访问</p>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div class="topbar-copy">
+            <div class="breadcrumb"><span>Local Ops</span><span aria-hidden="true">/</span><strong id="page-context">总览</strong></div>
+            <h1 id="page-title">运行总览</h1>
+            <p id="page-subtitle">查看本机服务、隧道和域名的实时状态。</p>
+          </div>
+          <div class="topbar-actions">
+            <span class="sync-chip"><span aria-hidden="true"></span><span class="last-sync" id="last-sync">等待首次同步</span></span>
+            <button class="icon-button" id="refresh-button" title="立即刷新" aria-label="立即刷新"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18.6 6.4A9 9 0 1 0 21 12h-2a7 7 0 1 1-2.1-5l-2.4 2.5H21V3l-2.4 3.4Z"/></svg></button>
+            <button class="secondary-button bulk-start-button" id="bulk-start-button" type="button" hidden>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></svg>
+              <span id="bulk-start-label">开启所有服务和 SSH 隧道</span>
+            </button>
+            <button class="primary-button" id="add-button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>添加资源</button>
+          </div>
+        </header>
+
+        <section class="view active" data-page="overview">
+          <div class="hero-status panel">
+            <div class="hero-copy">
+              <div class="status-line"><span class="status-beacon" id="hero-beacon"></span><span id="hero-label">正在读取运行状态</span></div>
+              <h2>本机控制面</h2>
+              <p>统一管理进程、SSH 隧道与本地域名，同时保留现有服务原本的运行方式。</p>
+            </div>
+            <div class="hero-meta">
+              <div><span>当前主机</span><strong id="host-name">—</strong></div>
+              <div><span>持续运行</span><strong id="host-uptime">—</strong></div>
+            </div>
+          </div>
+
+          <div class="metric-grid panel" aria-label="运行指标">
+            <article class="metric-card">
+              <span class="metric-icon green" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9.5 16.2-3.7-3.7 1.4-1.4 2.3 2.3 7.3-7.3 1.4 1.4-8.7 8.7Z"/></svg></span>
+              <div><small>运行中的进程</small><strong id="metric-running">—</strong><p id="metric-total">共 — 个托管进程</p></div>
+            </article>
+            <article class="metric-card">
+              <span class="metric-icon blue" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4V5Zm2 2v10h12V7H6Zm2 2h3v3H8V9Zm5 0h3v3h-3V9Zm-5 5h8v2H8v-2Z"/></svg></span>
+              <div><small>外部服务</small><strong id="metric-external">—</strong><p>在线并可被代理访问</p></div>
+            </article>
+            <article class="metric-card">
+              <span class="metric-icon violet" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 4h6v6h-2V7.4l-8.3 8.3-1.4-1.4L16.6 6H14V4ZM5 7h6v2H6v9h9v-5h2v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/></svg></span>
+              <div><small>本地域名</small><strong id="metric-routes">—</strong><p>*.localhost 路由</p></div>
+            </article>
+            <button class="metric-card metric-card-button" id="attention-button" type="button" aria-haspopup="dialog" aria-controls="attention-dialog">
+              <span class="metric-icon amber" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M11 7h2v6h-2V7Zm0 8h2v2h-2v-2Zm1-13 10 19H2L12 2Zm0 4.2L5.3 19h13.4L12 6.2Z"/></svg></span>
+              <div><small>需要关注</small><strong id="metric-attention">—</strong><p>点击查看停止、异常和离线项目</p></div>
+              <svg class="metric-detail-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7-1.4-1.4 5.6-5.6-5.6-5.6L9 5Z"/></svg>
+            </button>
+          </div>
+
+          <div class="overview-grid">
+            <section class="panel table-panel">
+              <div class="panel-heading">
+                <div><h2>托管进程</h2><p>由 Process Compose 统一管理</p></div>
+                <button class="text-button" data-jump="services">查看全部 →</button>
+              </div>
+              <div id="overview-processes" class="resource-list skeleton-list" aria-live="polite"></div>
+            </section>
+
+            <section class="panel route-panel">
+              <div class="panel-heading">
+                <div><h2>快捷入口</h2><p>直接打开本地域名</p></div>
+                <span class="muted-label" id="proxy-port-label">Caddy</span>
+              </div>
+              <div id="quick-routes" class="route-list skeleton-list"></div>
+            </section>
+          </div>
+
+          <section class="panel table-panel external-panel">
+            <div class="panel-heading">
+              <div><h2>现有服务</h2><p>探测已在本机运行的服务</p></div>
+              <span class="muted-label">只监控，不重复接管</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table external-data-table">
+                <thead><tr><th>服务</th><th>目标</th><th>状态</th><th>延迟</th><th>操作</th></tr></thead>
+                <tbody id="external-table"><tr><td colspan="5" class="empty-cell">正在探测…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" data-page="services">
+          <section class="panel table-panel full-panel">
+            <div class="panel-heading">
+              <div><h2>服务进程</h2><p>启动、停止、重启并查看实时日志。</p></div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table services-data-table">
+                <thead><tr><th>名称</th><th>分组</th><th>状态</th><th>PID</th><th>重启</th><th>操作</th><th class="sort-column">排序</th></tr></thead>
+                <tbody id="services-table"><tr><td colspan="7" class="empty-cell">正在加载…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" data-page="tunnels">
+          <section class="panel table-panel full-panel">
+            <div class="panel-heading">
+              <div><h2>SSH 隧道</h2><p>隧道断开后自动重连，只绑定到 127.0.0.1。</p></div>
+            </div>
+            <div id="tunnel-cards" class="card-grid"><p class="empty-card">还没有添加 SSH 隧道。</p></div>
+          </section>
+        </section>
+
+        <section class="view" data-page="routes">
+          <section class="panel table-panel full-panel">
+            <div class="panel-heading">
+              <div><h2>本地域名</h2><p>使用容易记忆的 *.localhost 地址代替 127.0.0.1。</p></div>
+              <button class="secondary-button" data-add-kind="route">＋ 添加域名</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table routes-data-table">
+                <thead><tr><th>名称</th><th>访问地址</th><th>转发目标</th><th>状态</th><th>操作</th><th class="sort-column">排序</th></tr></thead>
+                <tbody id="routes-table"><tr><td colspan="6" class="empty-cell">正在加载…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" data-page="docker">
+          <section class="panel table-panel full-panel">
+            <div class="panel-heading docker-heading">
+              <div><h2>Docker 容器</h2><p>读取本机 Docker Engine，集中启动、停止和重启容器。</p></div>
+              <div class="docker-runtime-state" id="docker-runtime-state"><span class="status-pill unknown">正在检查</span></div>
+            </div>
+            <div class="docker-notice" id="docker-notice" hidden>
+              <div><strong id="docker-notice-title">Docker 尚未运行</strong><p id="docker-notice-copy">启动 Docker Desktop 后即可管理本机容器。</p></div>
+              <button type="button" class="primary-button" id="docker-desktop-button">启动 Docker Desktop</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table docker-data-table">
+                <thead><tr><th>容器</th><th>镜像</th><th>状态</th><th>端口</th><th>Compose 项目</th><th>操作</th></tr></thead>
+                <tbody id="docker-table"><tr><td colspan="6" class="empty-cell">正在读取 Docker…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" data-page="terminal">
+          <section class="panel table-panel full-panel">
+            <div class="panel-heading">
+              <div><h2>终端操作</h2><p>在系统终端或 iTerm2 中执行常用命令与 SSH 连接。</p></div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table terminal-data-table">
+                <thead><tr><th>名称</th><th>类型</th><th>终端</th><th>操作摘要</th><th>操作</th><th class="sort-column">排序</th></tr></thead>
+                <tbody id="terminal-table"><tr><td colspan="6" class="empty-cell">还没有终端操作。</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" data-page="settings">
+          <div class="settings-grid">
+            <section class="panel settings-card portless-card">
+              <div class="portless-copy">
+                <span class="settings-icon portless-icon" aria-hidden="true">80</span>
+                <div>
+                  <h2>无端口访问</h2>
+                  <p class="settings-intro">首次启用时由 macOS 授权，将本机 80 端口安全转发到 Caddy。</p>
+                </div>
+              </div>
+              <div class="portless-control">
+                <span class="status-pill unknown" id="portless-status" aria-live="polite">正在检查</span>
+                <p id="portless-description">启用后可直接访问 http://openclaw.localhost</p>
+                <button class="primary-button" id="portless-button" type="button" disabled>正在检查…</button>
+              </div>
+            </section>
+            <section class="panel settings-card automation-card">
+              <div class="automation-summary">
+                <span class="settings-icon automation-icon" aria-hidden="true">↗</span>
+                <div class="automation-copy"><h2>启动自动化</h2><p class="settings-intro">控制 App 登录启动，以及打开 App 时自动启动哪些资源。</p></div>
+              </div>
+              <div class="switch-list" id="startup-settings">
+                <label class="switch-row"><span><strong>开机自启动</strong><small>登录 macOS 后自动打开 Local Ops App</small></span><input type="checkbox" role="switch" data-setting-key="launchAppAtLogin"><i aria-hidden="true"></i></label>
+                <label class="switch-row"><span><strong>启动 App 时开启所有服务</strong><small>启动当前尚未运行的自定义服务</small></span><input type="checkbox" role="switch" data-setting-key="startServicesOnAppLaunch"><i aria-hidden="true"></i></label>
+                <label class="switch-row"><span><strong>启动 App 时开启所有 SSH 隧道</strong><small>连接当前尚未运行的 SSH 隧道</small></span><input type="checkbox" role="switch" data-setting-key="startTunnelsOnAppLaunch"><i aria-hidden="true"></i></label>
+                <label class="switch-row"><span><strong>启动 App 时开启 Docker 和 所有容器</strong><small>自动打开 Docker Desktop，等待 Engine 就绪后启动全部已停止容器</small></span><input type="checkbox" role="switch" data-setting-key="startDockerOnAppLaunch"><i aria-hidden="true"></i></label>
+              </div>
+            </section>
+            <section class="panel settings-card language-card">
+              <span class="settings-icon language-icon" aria-hidden="true">文</span>
+              <h2>界面语言</h2>
+              <p class="settings-intro">选择 Local Ops 使用的显示语言。</p>
+              <div class="language-options" role="group" aria-label="界面语言">
+                <button type="button" data-language="zh-CN">简体中文</button>
+                <button type="button" data-language="en-US">English</button>
+              </div>
+              <p class="language-hint">语言切换后立即应用，并保存到本机配置。</p>
+            </section>
+            <section class="panel settings-card config-transfer-card">
+              <span class="settings-icon transfer-icon" aria-hidden="true">⇄</span>
+              <h2>配置迁移</h2>
+              <p class="settings-intro">把 Local Ops 管理的资源与启动偏好迁移到另一台 Mac。</p>
+              <div class="config-transfer-scope">
+                <p><strong>包含</strong>服务、SSH 隧道、现有服务、反向代理、终端操作、界面语言和非 Docker 启动设置。</p>
+                <p><strong>不包含</strong>Docker Engine、容器、Docker 命令服务与 Docker 启动偏好；系统端口和管理员授权保留本机设置。</p>
+              </div>
+              <div class="config-transfer-actions">
+                <button class="secondary-button" id="config-export-button" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M11 3h2v10.2l3.6-3.6L18 11l-6 6-6-6 1.4-1.4 3.6 3.6V3ZM5 19h14v2H5v-2Z"/></svg>导出配置</button>
+                <button class="primary-button" id="config-import-button" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M11 21h2V10.8l3.6 3.6L18 13l-6-6-6 6 1.4 1.4 3.6-3.6V21ZM5 3h14v2H5V3Z"/></svg>导入配置</button>
+                <input id="config-import-file" type="file" accept="application/json,.json" hidden>
+              </div>
+            </section>
+            <section class="panel settings-card safety-card">
+              <span class="settings-icon safe" aria-hidden="true">✓</span><h2>安全边界</h2><p class="settings-intro">所有写操作和转发范围都限制在本机。</p>
+              <ul>
+                <li><span>✓</span>控制 API 仅监听 127.0.0.1</li>
+                <li><span>✓</span>写操作需要页面临时令牌</li>
+                <li><span>✓</span>SSH 隧道默认只绑定回环地址</li>
+                <li><span>✓</span>反向代理目标限制为本机端口</li>
+              </ul>
+              <p>这个控制台能执行你配置的服务命令，请勿把它转发到公网。</p>
+            </section>
+            <section class="panel settings-card runtime-card">
+              <span class="settings-icon" aria-hidden="true">⚙</span><h2>运行设置</h2><p class="settings-intro">本机控制面的监听端口和运行资源。</p>
+              <dl id="settings-list"><div><dt>加载中</dt><dd>—</dd></div></dl>
+              <button class="secondary-button wide" id="reload-button">重新加载全部配置</button>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="add-dialog" class="modal">
+      <form method="dialog" class="modal-shell" id="resource-form">
+        <div class="modal-head">
+          <div><span class="modal-label" id="resource-modal-label">新资源</span><h2 id="resource-modal-title">添加资源</h2></div>
+          <button type="button" class="close-button" id="add-close" aria-label="关闭">×</button>
+        </div>
+        <div class="segmented" id="resource-tabs" role="tablist" aria-label="资源类型">
+          <button type="button" class="segment active" data-form-tab="service">Node / 命令服务</button>
+          <button type="button" class="segment" data-form-tab="tunnel">SSH 隧道</button>
+          <button type="button" class="segment" data-form-tab="route">本地域名</button>
+          <button type="button" class="segment" data-form-tab="terminal">终端操作</button>
+        </div>
+
+        <div class="form-panel active" data-form-panel="service">
+          <div class="field-grid two">
+            <label>显示名称<input name="service-name" required placeholder="例如：OpenClaw Gateway"></label>
+            <label>唯一 ID<input name="service-id" placeholder="例如：openclaw-gateway"></label>
+          </div>
+          <div class="resource-icon-field">
+            <span class="field-label">列表图标</span>
+            <input type="hidden" name="service-icon" value="nodejs">
+            <button type="button" class="icon-picker-trigger" data-icon-picker="service-icon"><span class="icon-preview" data-icon-preview></span><span><strong data-icon-label>Node.js</strong><small>点击选择品牌或工具图标</small></span><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7-1.4-1.4L13.2 12 7.6 6.4 9 5Z"/></svg></button>
+          </div>
+          <label>工作目录<input name="service-dir" required placeholder="/Users/you/Projects/openclaw"></label>
+          <label>启动命令<input name="service-command" required placeholder="npm run dev"></label>
+          <label>说明<input name="service-description" placeholder="例如：OpenClaw 本地网关服务"></label>
+          <div class="field-grid two">
+            <label>健康检查 URL<input name="service-health" placeholder="http://127.0.0.1:3000/health"></label>
+            <label>分组<input name="service-namespace" value="services"></label>
+          </div>
+          <div class="field-grid two">
+            <label>服务类型<select name="service-kind"><option value="node">Node 服务</option><option value="command">命令服务</option><option value="docker">Docker 命令服务</option></select></label>
+            <label>退出后重启<select name="service-restart"><option value="always">总是重启</option><option value="on_failure">仅失败时重启</option><option value="no">不自动重启</option></select></label>
+          </div>
+          <div class="field-grid two service-route-fields">
+            <label>本地域名（可选）<input name="service-domain" placeholder="api.localhost"></label>
+            <label>服务端口（配置域名时必填）<input name="service-port" inputmode="numeric" placeholder="3000"></label>
+          </div>
+          <label class="check-row"><input type="checkbox" name="service-autostart" checked><span>服务调度器启动时自动运行</span></label>
+        </div>
+
+        <div class="form-panel" data-form-panel="tunnel">
+          <div class="field-grid two">
+            <label>显示名称<input name="tunnel-name" placeholder="例如：New API 管理隧道"></label>
+            <label>唯一 ID<input name="tunnel-id" placeholder="例如：new-api-tunnel"></label>
+          </div>
+          <div class="resource-icon-field">
+            <span class="field-label">列表图标</span>
+            <input type="hidden" name="tunnel-icon" value="ssh">
+            <button type="button" class="icon-picker-trigger" data-icon-picker="tunnel-icon"><span class="icon-preview" data-icon-preview></span><span><strong data-icon-label>SSH</strong><small>点击选择品牌或工具图标</small></span><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7-1.4-1.4L13.2 12 7.6 6.4 9 5Z"/></svg></button>
+          </div>
+          <div class="field-grid two">
+            <label>SSH 用户<input name="tunnel-user" placeholder="ubuntu"></label>
+            <label>SSH 主机<input name="tunnel-host" placeholder="server.example.com"></label>
+          </div>
+          <div class="field-grid two">
+            <label>SSH 端口<input name="tunnel-ssh-port" inputmode="numeric" value="22"></label>
+            <label>说明<input name="tunnel-description" placeholder="例如：访问 VPS 上的 New API 管理页"></label>
+          </div>
+          <div class="forward-grid">
+            <label>本地端口<input name="tunnel-local-port" inputmode="numeric" placeholder="15432"></label>
+            <span aria-hidden="true">→</span>
+            <label>远端主机<input name="tunnel-remote-host" value="127.0.0.1"></label>
+            <label>远端端口<input name="tunnel-remote-port" inputmode="numeric" placeholder="5432"></label>
+          </div>
+          <label>SSH 私钥（可选）<input name="tunnel-key" placeholder="~/.ssh/id_ed25519"></label>
+          <p class="form-hint">可填写 ~/.ssh/密钥名；Local Ops 会自动加入 -NT、IdentitiesOnly、ExitOnForwardFailure 和断线保活参数。</p>
+          <label class="check-row"><input type="checkbox" name="tunnel-autostart" checked><span>服务调度器启动时自动连接，断线自动重连</span></label>
+        </div>
+
+        <div class="form-panel" data-form-panel="route">
+          <div class="field-grid two">
+            <label>显示名称<input name="route-name" placeholder="例如：OpenClaw"></label>
+            <label>唯一 ID<input name="route-id" placeholder="例如：openclaw"></label>
+          </div>
+          <div class="resource-icon-field">
+            <span class="field-label">列表图标</span>
+            <input type="hidden" name="route-icon" value="link">
+            <button type="button" class="icon-picker-trigger" data-icon-picker="route-icon"><span class="icon-preview" data-icon-preview></span><span><strong data-icon-label>链接</strong><small>点击选择品牌或工具图标</small></span><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7-1.4-1.4L13.2 12 7.6 6.4 9 5Z"/></svg></button>
+          </div>
+          <label>本地域名<input name="route-host" placeholder="openclaw.localhost"></label>
+          <label>转发目标<input name="route-target" placeholder="127.0.0.1:18789"></label>
+          <label class="check-row"><input type="checkbox" name="route-enabled" checked><span>启用这个本地域名</span></label>
+          <p class="form-hint">域名必须以 .localhost 结尾，目标必须是本机回环地址。</p>
+        </div>
+
+        <div class="form-panel" data-form-panel="terminal">
+          <div class="field-grid two">
+            <label>显示名称<input name="terminal-name" placeholder="例如：打开 OpenClaw 日志"></label>
+            <label>唯一 ID<input name="terminal-id" placeholder="例如：openclaw-logs"></label>
+          </div>
+          <div class="resource-icon-field">
+            <span class="field-label">列表图标</span>
+            <input type="hidden" name="terminal-icon" value="terminal">
+            <button type="button" class="icon-picker-trigger" data-icon-picker="terminal-icon"><span class="icon-preview" data-icon-preview></span><span><strong data-icon-label>终端</strong><small>点击选择品牌或工具图标</small></span><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7-1.4-1.4L13.2 12 7.6 6.4 9 5Z"/></svg></button>
+          </div>
+          <label>说明<input name="terminal-description" placeholder="例如：在 iTerm2 中持续查看网关日志"></label>
+          <div class="field-grid two">
+            <label>执行终端<select name="terminal-app"><option value="terminal">系统终端 Terminal</option><option value="iterm2">iTerm2</option></select></label>
+            <label>操作类型<select name="terminal-kind" id="terminal-kind-select"><option value="command">执行命令</option><option value="ssh">SSH 连接 / 转发</option></select></label>
+          </div>
+          <div data-terminal-section="command">
+            <label>工作目录（可选）<input name="terminal-dir" placeholder="/Users/you/Projects/app"></label>
+            <label>终端命令<textarea name="terminal-command" rows="4" placeholder="npm run dev"></textarea></label>
+          </div>
+          <div class="terminal-ssh-fields" data-terminal-section="ssh" hidden>
+            <div class="field-grid two">
+              <label>SSH 用户<input name="terminal-ssh-user" placeholder="ubuntu"></label>
+              <label>SSH 主机<input name="terminal-ssh-host" placeholder="server.example.com"></label>
+            </div>
+            <div class="field-grid two">
+              <label>SSH 端口<input name="terminal-ssh-port" inputmode="numeric" value="22"></label>
+              <label>SSH 私钥（可选）<input name="terminal-ssh-key" placeholder="~/.ssh/id_ed25519"></label>
+            </div>
+            <p class="form-hint">仅连接服务器时，下面三个转发字段可以留空。转发时会自动加入 -NT、IdentitiesOnly、ExitOnForwardFailure 和保活参数。</p>
+            <div class="forward-grid">
+              <label>本地端口<input name="terminal-local-port" inputmode="numeric" placeholder="15432"></label>
+              <span aria-hidden="true">→</span>
+              <label>远端主机<input name="terminal-remote-host" value="127.0.0.1"></label>
+              <label>远端端口<input name="terminal-remote-port" inputmode="numeric" placeholder="5432"></label>
+            </div>
+          </div>
+          <p class="form-hint">首次执行时，macOS 可能会询问是否允许 Local Ops 控制所选终端。</p>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="ghost-button" id="add-cancel">取消</button>
+          <button type="submit" value="default" class="primary-button" id="save-resource">保存并应用</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="icon-dialog" class="modal icon-modal">
+      <div class="modal-shell">
+        <div class="modal-head">
+          <div><span class="modal-label">资源外观</span><h2>选择图标</h2></div>
+          <button type="button" class="close-button" id="icon-close" aria-label="关闭图标选择">×</button>
+        </div>
+        <div class="icon-picker-body">
+          <label class="icon-search"><span class="sr-only">搜索图标</span><input id="icon-search" type="search" autocomplete="off" placeholder="搜索 OpenClaw、Hermes、Docker、数据库…"></label>
+          <div class="icon-library" id="icon-library"></div>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="logs-dialog" class="modal logs-modal">
+      <div class="modal-shell">
+        <div class="modal-head">
+          <div><span class="modal-label">进程输出</span><h2 id="logs-title">进程日志</h2></div>
+          <div class="modal-head-actions">
+            <button class="icon-button" id="logs-refresh" aria-label="刷新日志">↻</button>
+            <button class="close-button" id="logs-close" aria-label="关闭">×</button>
+          </div>
+        </div>
+        <pre id="logs-output" tabindex="0">正在读取日志…</pre>
+      </div>
+    </dialog>
+
+    <dialog id="attention-dialog" class="modal attention-modal">
+      <div class="modal-shell">
+        <div class="modal-head">
+          <div><span class="modal-label">运行状态</span><h2>需要关注</h2></div>
+          <button type="button" class="close-button" id="attention-close" aria-label="关闭">×</button>
+        </div>
+        <div class="attention-body">
+          <p class="attention-intro">以下项目需要处理</p>
+          <div class="attention-list" id="attention-list"></div>
+        </div>
+      </div>
+    </dialog>
+
+    <div id="action-menu" class="action-menu" role="menu" aria-label="更多操作" hidden></div>
+    <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+  </body>
+</html>

@@ -1,0 +1,87 @@
+{
+  "name": "local-ops-desktop",
+  "version": "1.7.0",
+  "description": "Native macOS shell for the Local Ops control plane",
+  "private": true,
+  "main": "main.cjs",
+  "author": "Arvinnma",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arvinnma/local-ops-console.git"
+  },
+  "scripts": {
+    "start": "electron .",
+    "icon": "zsh scripts/generate-icon.zsh",
+    "bundle": "zsh scripts/prepare-bundle.zsh",
+    "pack": "npm run icon && npm run bundle && electron-builder --mac dir --arm64",
+    "dmg": "npm run icon && npm run bundle && electron-builder --mac dmg --arm64"
+  },
+  "devDependencies": {
+    "electron": "43.1.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.arvin.localops",
+    "productName": "Local Ops",
+    "asar": true,
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "splash.html",
+      "offline.html",
+      "shell.css"
+    ],
+    "extraResources": [
+      {
+        "from": "bundle/local-ops",
+        "to": "local-ops"
+      },
+      {
+        "from": "portless",
+        "to": "portless"
+      }
+    ],
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "afterPack": "scripts/after-pack.cjs",
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "hardenedRuntime": false,
+      "darkModeSupport": true
+    },
+    "dmg": {
+      "title": "Local Ops ${version}",
+      "artifactName": "Local-Ops-${version}-${arch}.${ext}",
+      "window": {
+        "width": 560,
+        "height": 390
+      },
+      "contents": [
+        {
+          "x": 150,
+          "y": 195,
+          "type": "file"
+        },
+        {
+          "x": 410,
+          "y": 195,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}

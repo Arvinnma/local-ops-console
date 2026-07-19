@@ -1,0 +1,33 @@
+{
+  "name": "local-ops-console",
+  "version": "1.7.0",
+  "description": "A local-first macOS control plane for services, SSH tunnels, Docker containers, terminal tasks, and .localhost routes.",
+  "private": true,
+  "type": "module",
+  "author": "Arvinnma",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arvinnma/local-ops-console.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Arvinnma/local-ops-console/issues"
+  },
+  "homepage": "https://github.com/Arvinnma/local-ops-console#readme",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "render": "node scripts/render-config.mjs",
+    "generate:icons": "node scripts/generate-icon-library.mjs",
+    "check": "node --check public/app.js && node --check public/i18n.js && node --check src/config.mjs && node --check src/server.mjs",
+    "test": "node --test tests/config.test.mjs",
+    "install:local": "zsh scripts/install.zsh",
+    "build:app": "zsh scripts/build-app.zsh",
+    "build:dmg": "cd desktop && npm run dmg"
+  },
+  "devDependencies": {
+    "simple-icons": "^16.26.0"
+  }
+}

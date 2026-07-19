@@ -1,0 +1,392 @@
+const SUPPORTED_LOCALES = new Set(["zh-CN", "en-US"]);
+
+const ENGLISH = new Map(Object.entries({
+  "Local Ops · 本机服务控制台": "Local Ops · Local Service Console",
+  "本机服务控制台": "Local service console",
+  "Local Ops 控制台": "Local Ops Console",
+  "本机服务、隧道和域名的可视化管理入口": "Visual management entry point for local services, tunnels, and domains",
+  "Caddy 反向代理": "Caddy Reverse Proxy",
+  "将 *.localhost 域名转发到本机服务": "Forward *.localhost domains to local services",
+  "服务调度器": "Service Scheduler",
+  "独立管理用户服务和 SSH 隧道，热更新不会中断网页": "Manage user services and SSH tunnels independently without interrupting the UI during reloads",
+  "管理本机服务、SSH 隧道、Docker、终端任务和反向代理域名": "Manage local services, SSH tunnels, Docker, terminal tasks, and reverse-proxy domains",
+  "Local Ops 首页": "Local Ops home",
+  "工作台": "Workspace",
+  "主导航": "Main navigation",
+  "总览": "Overview",
+  "服务": "Services",
+  "SSH 隧道": "SSH Tunnels",
+  "反向代理": "Reverse Proxy",
+  "终端": "Terminal",
+  "设置": "Settings",
+  "正在连接": "Connecting",
+  "仅限本机访问": "Local access only",
+  "运行总览": "Operations Overview",
+  "服务进程": "Service Processes",
+  "终端操作": "Terminal Actions",
+  "控制台设置": "Console Settings",
+  "查看本机服务、隧道和域名的实时状态。": "View the live status of local services, tunnels, and domains.",
+  "集中启动、停止、编辑和排序由控制面托管的进程。": "Start, stop, edit, and reorder processes managed by the control plane.",
+  "管理会自动重连、仅绑定本机的 SSH 转发。": "Manage auto-reconnecting SSH forwards bound to this Mac only.",
+  "用容易记忆的 .localhost 域名访问本机服务。": "Reach local services through memorable .localhost domains.",
+  "查看并控制本机 Docker Engine 中的容器。": "View and control containers in the local Docker Engine.",
+  "保存常用命令和 SSH 连接，在选定终端中一键执行。": "Save common commands and SSH connections for one-click execution in your preferred terminal.",
+  "配置启动自动化、访问方式和控制面安全边界。": "Configure startup automation, access, language, and security boundaries.",
+  "等待首次同步": "Waiting for first sync",
+  "立即刷新": "Refresh now",
+  "开启所有服务和 SSH 隧道": "Start all services and SSH tunnels",
+  "开启所有服务": "Start all services",
+  "开启所有 SSH 隧道": "Start all SSH tunnels",
+  "开启所有 Docker": "Start all Docker containers",
+  "添加资源": "Add Resource",
+  "正在读取运行状态": "Reading runtime status",
+  "本机控制面": "Local Control Plane",
+  "统一管理进程、SSH 隧道与本地域名，同时保留现有服务原本的运行方式。": "Manage processes, SSH tunnels, and local domains while preserving how existing services run.",
+  "当前主机": "Current host",
+  "持续运行": "Uptime",
+  "运行指标": "Runtime metrics",
+  "运行中的进程": "Running processes",
+  "外部服务": "External services",
+  "在线并可被代理访问": "Online and reachable through the proxy",
+  "本地域名": "Local domains",
+  "*.localhost 路由": "*.localhost routes",
+  "需要关注": "Needs Attention",
+  "点击查看停止、异常和离线项目": "View stopped, unhealthy, and offline items",
+  "托管进程": "Managed Processes",
+  "由 Process Compose 统一管理": "Managed by Process Compose",
+  "查看全部 →": "View all →",
+  "快捷入口": "Quick Links",
+  "直接打开本地域名": "Open local domains directly",
+  "现有服务": "Existing Services",
+  "探测已在本机运行的服务": "Probe services already running on this Mac",
+  "只监控，不重复接管": "Monitor only; do not take over",
+  "目标": "Target",
+  "状态": "Status",
+  "延迟": "Latency",
+  "操作": "Actions",
+  "正在探测…": "Probing…",
+  "启动、停止、重启并查看实时日志。": "Start, stop, restart, and inspect live logs.",
+  "名称": "Name",
+  "分组": "Group",
+  "重启": "Restart",
+  "排序": "Order",
+  "正在加载…": "Loading…",
+  "隧道断开后自动重连，只绑定到 127.0.0.1。": "Reconnect tunnels automatically and bind them to 127.0.0.1 only.",
+  "还没有添加 SSH 隧道。": "No SSH tunnels have been added yet.",
+  "使用容易记忆的 *.localhost 地址代替 127.0.0.1。": "Use memorable *.localhost addresses instead of 127.0.0.1.",
+  "＋ 添加域名": "+ Add Domain",
+  "访问地址": "Access URL",
+  "转发目标": "Forward Target",
+  "Docker 容器": "Docker Containers",
+  "读取本机 Docker Engine，集中启动、停止和重启容器。": "Read the local Docker Engine and centrally start, stop, or restart containers.",
+  "正在检查": "Checking",
+  "Docker 尚未运行": "Docker is not running",
+  "启动 Docker Desktop 后即可管理本机容器。": "Start Docker Desktop to manage local containers.",
+  "启动 Docker Desktop": "Start Docker Desktop",
+  "容器": "Container",
+  "镜像": "Image",
+  "端口": "Ports",
+  "Compose 项目": "Compose Project",
+  "正在读取 Docker…": "Reading Docker…",
+  "在系统终端或 iTerm2 中执行常用命令与 SSH 连接。": "Run common commands and SSH connections in Terminal or iTerm2.",
+  "类型": "Type",
+  "操作摘要": "Action Summary",
+  "还没有终端操作。": "No terminal actions yet.",
+  "无端口访问": "Portless Access",
+  "首次启用时由 macOS 授权，将本机 80 端口安全转发到 Caddy。": "On first use, macOS authorizes a safe local port 80 forward to Caddy.",
+  "启用后可直接访问 http://openclaw.localhost": "Access http://openclaw.localhost directly after enabling",
+  "正在检查…": "Checking…",
+  "启动自动化": "Startup Automation",
+  "控制 App 登录启动，以及打开 App 时自动启动哪些资源。": "Control login launch and which resources start when the app opens.",
+  "开机自启动": "Launch at Login",
+  "登录 macOS 后自动打开 Local Ops App": "Open Local Ops automatically after signing in to macOS",
+  "启动 App 时开启所有服务": "Start all services when the app opens",
+  "启动当前尚未运行的自定义服务": "Start custom services that are not already running",
+  "启动 App 时开启所有 SSH 隧道": "Start all SSH tunnels when the app opens",
+  "连接当前尚未运行的 SSH 隧道": "Connect SSH tunnels that are not already running",
+  "启动 App 时开启 Docker 和 所有容器": "Start Docker and all containers when the app opens",
+  "自动打开 Docker Desktop，等待 Engine 就绪后启动全部已停止容器": "Open Docker Desktop, wait for the Engine, then start all stopped containers",
+  "界面语言": "Interface Language",
+  "选择 Local Ops 使用的显示语言。": "Choose the display language used by Local Ops.",
+  "简体中文": "简体中文",
+  "语言切换后立即应用，并保存到本机配置。": "Language changes apply immediately and are saved to this Mac.",
+  "配置迁移": "Configuration Transfer",
+  "把 Local Ops 管理的资源与启动偏好迁移到另一台 Mac。": "Move resources and startup preferences managed by Local Ops to another Mac.",
+  "包含": "Includes",
+  "服务、SSH 隧道、现有服务、反向代理、终端操作、界面语言和非 Docker 启动设置。": "Services, SSH tunnels, existing-service monitors, reverse proxies, terminal actions, interface language, and non-Docker startup settings.",
+  "不包含": "Excludes",
+  "Docker Engine、容器、Docker 命令服务与 Docker 启动偏好；系统端口和管理员授权保留本机设置。": "Docker Engine, containers, Docker command services, and Docker startup preferences; system ports and administrator authorization remain local.",
+  "导出配置": "Export Configuration",
+  "导入配置": "Import Configuration",
+  "运行设置": "Runtime Settings",
+  "本机控制面的监听端口和运行资源。": "Listening ports and runtime resources used by the local control plane.",
+  "加载中": "Loading",
+  "重新加载全部配置": "Reload All Configuration",
+  "安全边界": "Security Boundaries",
+  "所有写操作和转发范围都限制在本机。": "All write operations and forwarding scopes are restricted to this Mac.",
+  "控制 API 仅监听 127.0.0.1": "The control API listens on 127.0.0.1 only",
+  "写操作需要页面临时令牌": "Write operations require a temporary page token",
+  "SSH 隧道默认只绑定回环地址": "SSH tunnels bind to loopback addresses by default",
+  "反向代理目标限制为本机端口": "Reverse-proxy targets are limited to local ports",
+  "这个控制台能执行你配置的服务命令，请勿把它转发到公网。": "This console can execute configured service commands. Never expose it to the public internet.",
+  "新资源": "New Resource",
+  "关闭": "Close",
+  "资源类型": "Resource type",
+  "Node / 命令服务": "Node / Command Service",
+  "显示名称": "Display Name",
+  "唯一 ID": "Unique ID",
+  "列表图标": "List Icon",
+  "点击选择品牌或工具图标": "Choose a brand or tool icon",
+  "工作目录": "Working Directory",
+  "启动命令": "Start Command",
+  "说明": "Description",
+  "健康检查 URL": "Health Check URL",
+  "服务类型": "Service Type",
+  "Node 服务": "Node Service",
+  "命令服务": "Command Service",
+  "Docker 命令服务": "Docker Command Service",
+  "退出后重启": "Restart After Exit",
+  "总是重启": "Always restart",
+  "仅失败时重启": "Restart on failure",
+  "不自动重启": "Do not restart",
+  "本地域名（可选）": "Local Domain (Optional)",
+  "服务端口（配置域名时必填）": "Service Port (Required with a domain)",
+  "服务调度器启动时自动运行": "Start automatically with the service scheduler",
+  "SSH 用户": "SSH User",
+  "SSH 主机": "SSH Host",
+  "SSH 端口": "SSH Port",
+  "本地端口": "Local Port",
+  "远端主机": "Remote Host",
+  "远端端口": "Remote Port",
+  "SSH 私钥（可选）": "SSH Private Key (Optional)",
+  "可填写 ~/.ssh/密钥名；Local Ops 会自动加入 -NT、IdentitiesOnly、ExitOnForwardFailure 和断线保活参数。": "Enter a ~/.ssh key path; Local Ops automatically adds -NT, IdentitiesOnly, ExitOnForwardFailure, and keepalive options.",
+  "服务调度器启动时自动连接，断线自动重连": "Connect with the service scheduler and reconnect automatically",
+  "链接": "Link",
+  "启用这个本地域名": "Enable this local domain",
+  "域名必须以 .localhost 结尾，目标必须是本机回环地址。": "The domain must end in .localhost and target a local loopback address.",
+  "执行终端": "Terminal App",
+  "系统终端 Terminal": "Terminal.app",
+  "操作类型": "Action Type",
+  "执行命令": "Run Command",
+  "SSH 连接 / 转发": "SSH Connection / Forward",
+  "工作目录（可选）": "Working Directory (Optional)",
+  "终端命令": "Terminal Command",
+  "仅连接服务器时，下面三个转发字段可以留空。转发时会自动加入 -NT、IdentitiesOnly、ExitOnForwardFailure 和保活参数。": "Leave the three forwarding fields empty for a plain SSH connection. For forwarding, Local Ops adds -NT, IdentitiesOnly, ExitOnForwardFailure, and keepalive options.",
+  "首次执行时，macOS 可能会询问是否允许 Local Ops 控制所选终端。": "On first run, macOS may ask permission for Local Ops to control the selected terminal.",
+  "取消": "Cancel",
+  "保存并应用": "Save and Apply",
+  "资源外观": "Resource Appearance",
+  "选择图标": "Choose Icon",
+  "关闭图标选择": "Close icon picker",
+  "搜索图标": "Search icons",
+  "搜索 OpenClaw、Hermes、Docker、数据库…": "Search OpenClaw, Hermes, Docker, databases…",
+  "进程输出": "Process Output",
+  "进程日志": "Process Logs",
+  "刷新日志": "Refresh logs",
+  "正在读取日志…": "Reading logs…",
+  "更多操作": "More Actions",
+  "控制面运行正常": "Control plane is healthy",
+  "控制面连接异常": "Control plane connection failed",
+  "Caddy · 无端口访问": "Caddy · Portless access",
+  "等待运行状态": "Waiting for runtime status",
+  "没有托管进程。": "No managed processes.",
+  "还没有配置域名。": "No domains configured yet.",
+  "在线": "Online",
+  "离线": "Offline",
+  "打开": "Open",
+  "没有可用入口": "No available entry point",
+  "没有外部服务。": "No external services.",
+  "没有服务进程。": "No service processes.",
+  "经由": "Via",
+  "本地监听": "Local Listener",
+  "自动连接": "Auto-connect",
+  "手动连接": "Manual connection",
+  "还没有添加 SSH 隧道。点击右上角开始添加。": "No SSH tunnels yet. Use Add Resource to create one.",
+  "已启用": "Enabled",
+  "已禁用": "Disabled",
+  "还没有配置本地域名。": "No local domains configured yet.",
+  "命令": "Command",
+  "系统终端": "Terminal.app",
+  "执行": "Run",
+  "编辑": "Edit",
+  "删除": "Delete",
+  "还没有终端操作。点击右上角开始添加。": "No terminal actions yet. Use Add Resource to create one.",
+  "未安装": "Not installed",
+  "没有找到 Docker CLI": "Docker CLI not found",
+  "请先安装 Docker Desktop，再重新打开 Local Ops。": "Install Docker Desktop, then reopen Local Ops.",
+  "Docker 尚未安装。": "Docker is not installed.",
+  "Engine 未运行": "Engine not running",
+  "Docker Engine 尚未运行": "Docker Engine is not running",
+  "启动 Docker Desktop，等待 Engine 就绪后即可管理本机容器。": "Start Docker Desktop and wait for the Engine before managing local containers.",
+  "等待 Docker Engine 启动。": "Waiting for Docker Engine to start.",
+  "Docker Engine 在线，但还没有容器。": "Docker Engine is online, but there are no containers.",
+  "运行中": "Running",
+  "已停止": "Stopped",
+  "已创建": "Created",
+  "已暂停": "Paused",
+  "重启中": "Restarting",
+  "异常": "Failed",
+  "网页控制台": "Web Console",
+  "Caddy 内部端口": "Caddy Internal Port",
+  "服务调度 API": "Service Scheduler API",
+  "内存占用": "Memory Usage",
+  "等待同步": "Waiting for sync",
+  "等待授权": "Waiting for authorization",
+  "请在 macOS 系统窗口中输入管理员密码。": "Enter your administrator password in the macOS system prompt.",
+  "正在处理…": "Working…",
+  "现在可以直接使用 http://openclaw.localhost 等地址。": "You can now use addresses such as http://openclaw.localhost directly.",
+  "关闭无端口访问": "Disable Portless Access",
+  "请在 Local Ops App 内管理": "Manage in the Local Ops app",
+  "需要修复": "Needs repair",
+  "系统转发规则没有生效，可以重新授权修复。": "The system forwarding rule is inactive. Reauthorize to repair it.",
+  "修复无端口访问": "Repair Portless Access",
+  "未启用": "Not enabled",
+  "启用后可直接访问 http://openclaw.localhost，不再显示 :19080。": "Access http://openclaw.localhost directly without :19080 after enabling.",
+  "请在 Local Ops App 内启用，浏览器页面不能请求系统授权。": "Enable this in the Local Ops app; a browser page cannot request system authorization.",
+  "启用无端口访问": "Enable Portless Access",
+  "请在 Local Ops App 内启用": "Enable in the Local Ops app",
+  "查看日志": "View Logs",
+  "开启": "Start",
+  "启动": "Start",
+  "停止": "Stop",
+  "暂无更多操作": "No more actions",
+  "启动设置已保存": "Startup settings saved",
+  "排序已保存": "Order saved",
+  "配置已重新加载": "Configuration reloaded",
+  "已在所选终端中执行": "Executed in the selected terminal",
+  "更改已保存并应用": "Changes saved and applied",
+  "资源已保存并应用": "Resource saved and applied",
+  "保存更改": "Save Changes",
+  "没有找到要编辑的资源": "The resource to edit was not found",
+  "没有匹配的图标。": "No matching icons.",
+  "系统固定资源不可排序": "System resources cannot be reordered",
+  "拖动排序": "Drag to reorder",
+  "未知": "Unknown",
+  "暂时没有日志输出。": "No log output yet.",
+  "控制面在线": "Control plane online",
+  "控制面离线": "Control plane offline",
+  "健康检查异常": "Health check failed",
+  "现有服务离线": "Existing service offline",
+  "托管进程已停止": "Managed process stopped",
+  "查看详情": "View details",
+  "运行状态": "Runtime Status",
+  "以下项目需要处理": "The following items need attention",
+  "当前没有需要关注的项目。": "There are no items requiring attention.",
+  "前往查看": "View",
+  "界面语言已切换": "Interface language updated",
+  "配置已导出，Docker 内容未包含": "Configuration exported without Docker data",
+  "配置文件": "configuration file",
+  "配置文件不能超过 2 MB": "Configuration files cannot exceed 2 MB",
+  "配置文件不是有效的 JSON": "The configuration file is not valid JSON",
+  "无端口访问已启用": "Portless access enabled",
+  "无端口访问已关闭": "Portless access disabled"
+}));
+
+const ENGLISH_PATTERNS = [
+  [/^同步于 (.+)$/u, ([, value]) => `Synced at ${value}`],
+  [/^共 (.+) 个托管进程$/u, ([, value]) => `${value} managed processes`],
+  [/^在线 · (\d+)$/u, ([, value]) => `Online · ${value}`],
+  [/^(\d+) 个容器$/u, ([, value]) => `${value} containers`],
+  [/^(\d+) 个 Docker 容器$/u, ([, value]) => `${value} Docker containers`],
+  [/^(\d+) 个服务$/u, ([, value]) => `${value} services`],
+  [/^(\d+) 个 SSH 隧道$/u, ([, value]) => `${value} SSH tunnels`],
+  [/^启动 (.+)$/u, ([, value]) => `Start ${value}`],
+  [/^正在启动 (.+)…$/u, ([, value]) => `Starting ${value}…`],
+  [/^已启动 (.+)$/u, ([, value]) => `Started ${value}`],
+  [/^所有(.+)均已运行$/u, ([, value]) => `All ${translateCore(value)} are already running`],
+  [/^(\d+) 天 (\d+) 小时$/u, ([, days, hours]) => `${days}d ${hours}h`],
+  [/^(\d+) 小时 (\d+) 分$/u, ([, hours, minutes]) => `${hours}h ${minutes}m`],
+  [/^(\d+) 分钟$/u, ([, minutes]) => `${minutes}m`],
+  [/^更多操作 (.+)$/u, ([, name]) => `More actions for ${name}`],
+  [/^(.+) 暂无更多操作$/u, ([, name]) => `No more actions for ${name}`],
+  [/^编辑(.+)$/u, ([, noun]) => `Edit ${translateCore(noun)}`],
+  [/^(.+)已删除$/u, ([, noun]) => `${translateCore(noun)} deleted`],
+  [/^(.+) 已(启动|停止|重启)$/u, ([, name, action]) => `${name} ${action === "启动" ? "started" : action === "停止" ? "stopped" : "restarted"}`],
+  [/^配置已导出为 (.+)$/u, ([, name]) => `Configuration exported as ${name}`],
+  [/^已导入 (\d+) 项配置，Docker 保持原状$/u, ([, count]) => `Imported ${count} configuration items; Docker was left unchanged`],
+  [/^PID (.+)$/u, ([, pid]) => `PID ${pid}`]
+];
+
+const textSources = new WeakMap();
+const attributeSources = new WeakMap();
+let activeLocale = "zh-CN";
+
+export function normalizeLocale(value) {
+  return SUPPORTED_LOCALES.has(value) ? value : "zh-CN";
+}
+
+export function getLocale() {
+  return activeLocale;
+}
+
+export function setLocale(value) {
+  activeLocale = normalizeLocale(value);
+  document.documentElement.lang = activeLocale;
+  localizeDocument(document);
+  return activeLocale;
+}
+
+export function tr(source, replacements = {}) {
+  const interpolated = String(source ?? "").replace(/\{(\w+)\}/g, (_match, key) => String(replacements[key] ?? ""));
+  return activeLocale === "en-US" ? translateCore(interpolated) : interpolated;
+}
+
+export function localizeDocument(root = document) {
+  document.documentElement.lang = activeLocale;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) localizeTextNode(node);
+  const elements = root.querySelectorAll?.("[title], [aria-label], [placeholder], meta[content]") || [];
+  for (const element of elements) {
+    for (const attribute of ["title", "aria-label", "placeholder", "content"]) {
+      if (element.hasAttribute(attribute)) localizeAttribute(element, attribute);
+    }
+  }
+}
+
+function localizeTextNode(node) {
+  if (["SCRIPT", "STYLE"].includes(node.parentElement?.tagName)) return;
+  const current = node.nodeValue || "";
+  let state = textSources.get(node);
+  if (!state || (current !== state.source && current !== state.rendered)) {
+    state = { source: current, rendered: current };
+    textSources.set(node, state);
+  }
+  state.rendered = translatePreservingWhitespace(state.source);
+  if (current !== state.rendered) node.nodeValue = state.rendered;
+}
+
+function localizeAttribute(element, attribute) {
+  const current = element.getAttribute(attribute) || "";
+  let states = attributeSources.get(element);
+  if (!states) {
+    states = new Map();
+    attributeSources.set(element, states);
+  }
+  let state = states.get(attribute);
+  if (!state || (current !== state.source && current !== state.rendered)) {
+    state = { source: current, rendered: current };
+    states.set(attribute, state);
+  }
+  state.rendered = activeLocale === "en-US" ? translateCore(state.source) : state.source;
+  if (current !== state.rendered) element.setAttribute(attribute, state.rendered);
+}
+
+function translatePreservingWhitespace(value) {
+  if (activeLocale !== "en-US") return value;
+  const leading = value.match(/^\s*/)?.[0] || "";
+  const trailing = value.match(/\s*$/)?.[0] || "";
+  const core = value.trim();
+  if (!core) return value;
+  return `${leading}${translateCore(core)}${trailing}`;
+}
+
+function translateCore(value) {
+  const exact = ENGLISH.get(value);
+  if (exact) return exact;
+  for (const [pattern, formatter] of ENGLISH_PATTERNS) {
+    const match = value.match(pattern);
+    if (match) return formatter(match);
+  }
+  return value;
+}
