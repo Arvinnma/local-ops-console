@@ -160,3 +160,7 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 ## License
 
 [MIT](LICENSE). Third-party notices are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Community
+
+- **[linux.do](https://linux.do)** — a thriving developer community.

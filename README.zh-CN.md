@@ -156,3 +156,7 @@ v1.8.0 发布门禁覆盖：语法和单元测试、中英文静态文案覆盖�
 ## 许可证
 
 项目使用 [MIT License](LICENSE)，第三方说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## 友情链接
+
+- **[linux.do](https://linux.do)** — 新的理想型社区
