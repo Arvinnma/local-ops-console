@@ -4,6 +4,14 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-07-20
+
+### Fixed
+
+- Re-enable the menu-bar **Control Panel** action after every invocation so the main window can be reopened repeatedly.
+- Restore and focus the macOS main window reliably after it has been hidden, minimized, or left inactive.
+- Add regression coverage for repeated menu-bar actions and native window activation behavior.
+
 ## [1.8.0] - 2026-07-19
 
 ### Added
@@ -69,5 +77,6 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 - Added the self-contained Electron DMG, automatic backend installation, portless loopback access, and bundled Caddy / Process Compose binaries.
 
 [1.7.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.7.0
+[1.8.1]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.1
 [1.8.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.0
 [1.6.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.6.0

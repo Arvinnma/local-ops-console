@@ -27,7 +27,7 @@ Local Ops 把 Electron 桌面 App、浏览器控制台、Process Compose 和 Cad
 - Docker 功能可选；使用时需要安装 Docker Desktop
 - 系统自带 Terminal.app；iTerm2 为可选项
 
-v1.8.0 暂不提供 Intel（`x64`）安装包。
+v1.8.1 暂不提供 Intel（`x64`）安装包。
 
 ## 功能一览
 
@@ -47,7 +47,7 @@ v1.8.0 暂不提供 Intel（`x64`）安装包。
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Arvinnma/local-ops-console/releases/latest) 下载 `Local-Ops-1.8.0-arm64.dmg`。
+1. 从 [Releases](https://github.com/Arvinnma/local-ops-console/releases/latest) 下载 `Local-Ops-1.8.1-arm64.dmg`。
 2. 打开 DMG，把 **Local Ops** 拖到“应用程序”。
 3. 从“应用程序”启动 **Local Ops**。
 
@@ -141,13 +141,13 @@ npm ci
 npm run dmg
 ```
 
-安装包输出到 `desktop/dist/Local-Ops-1.8.0-arm64.dmg`。打包步骤会把当前 Caddy 与 Process Compose 二进制复制进 App。
+安装包输出到 `desktop/dist/Local-Ops-1.8.1-arm64.dmg`。打包步骤会把当前 Caddy 与 Process Compose 二进制复制进 App。
 
 修改打包、原生 Helper、回环监听或 Electron 安全设置前，请先阅读[开发与发布文档](docs/DEVELOPMENT.md)。
 
 ## 发布验收
 
-v1.8.0 发布门禁覆盖：语法和单元测试、中英文静态文案覆盖、配置往返、API 安全校验、服务生命周期与日志、Caddy 路径路由、Docker 容器生命周期、加密私钥钥匙串集成、窄窗口浏览器 QA、App 签名与架构、挂载 DMG 的布局/签名检查，以及安装到“应用程序”后的启动冒烟测试。
+v1.8.1 发布门禁覆盖：语法和单元测试、中英文静态文案覆盖、配置往返、API 安全校验、服务生命周期与日志、Caddy 路径路由、Docker 容器生命周期、加密私钥钥匙串集成、菜单栏重复恢复窗口、窄窗口浏览器 QA、App 签名与架构、挂载 DMG 的布局/签名检查，以及安装到“应用程序”后的启动冒烟测试。
 
 ## 参与开发
 

@@ -27,7 +27,7 @@ Local Ops combines an Electron desktop app, a browser console, Process Compose, 
 - Docker Desktop is optional and is required only for Docker controls
 - Terminal.app is built in; iTerm2 is optional
 
-Intel (`x64`) packages are not provided in v1.8.0.
+Intel (`x64`) packages are not provided in v1.8.1.
 
 ## What it manages
 
@@ -47,7 +47,7 @@ Intel (`x64`) packages are not provided in v1.8.0.
 
 ## Install
 
-1. Download `Local-Ops-1.8.0-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
+1. Download `Local-Ops-1.8.1-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch **Local Ops** from Applications.
 
@@ -145,13 +145,13 @@ npm ci
 npm run dmg
 ```
 
-The distributable is written to `desktop/dist/Local-Ops-1.8.0-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
+The distributable is written to `desktop/dist/Local-Ops-1.8.1-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
 
 Read [Development and Release Guide](docs/DEVELOPMENT.md) before changing packaging, native helpers, loopback bindings, or Electron security settings.
 
 ## Verification
 
-The v1.8.0 release gate covers syntax and unit tests, bilingual static-copy coverage, configuration round trips, API security checks, service lifecycle and logs, Caddy path routing, Docker container lifecycle, encrypted-key Keychain integration, responsive browser QA, application signature and architecture, mounted-DMG layout/signature checks, and an installed-app launch smoke test.
+The v1.8.1 release gate covers syntax and unit tests, bilingual static-copy coverage, configuration round trips, API security checks, service lifecycle and logs, Caddy path routing, Docker container lifecycle, encrypted-key Keychain integration, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, mounted-DMG layout/signature checks, and an installed-app launch smoke test.
 
 ## Contributing
 

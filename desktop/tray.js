@@ -179,7 +179,10 @@ async function runPanelAction(action, control) {
   } catch (error) {
     showToast(error.message || "操作失败");
   } finally {
-    if (control && action.type !== "show-main") control.disabled = false;
+    // The panel is hidden while the main window is raised, but its renderer is
+    // kept alive. Always release the button so reopening the panel can invoke
+    // the same action again.
+    if (control) control.disabled = false;
   }
 }
 

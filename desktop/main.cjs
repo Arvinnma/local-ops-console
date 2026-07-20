@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
+const { bringWindowToFront } = require("./window-lifecycle.cjs");
 
 const execFileAsync = promisify(execFile);
 const CONTROL_URL = "http://127.0.0.1:19090/";
@@ -755,6 +756,7 @@ async function performTrayPanelAction(payload = {}) {
   }
   if (type === "show-main") {
     trayPanelWindow?.hide();
+    await new Promise((resolve) => setImmediate(resolve));
     showMainWindow();
     return {};
   }
@@ -1657,9 +1659,21 @@ async function waitForHealth(timeoutMs) {
 
 function showMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+  const before = mainWindowState();
+  bringWindowToFront(app, mainWindow, process.platform);
+  setTimeout(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    log(`main window requested: before=${JSON.stringify(before)} after=${JSON.stringify(mainWindowState())}`);
+  }, 120);
+}
+
+function mainWindowState() {
+  return {
+    appHidden: process.platform === "darwin" ? app.isHidden() : false,
+    visible: Boolean(mainWindow?.isVisible()),
+    minimized: Boolean(mainWindow?.isMinimized()),
+    focused: Boolean(mainWindow?.isFocused())
+  };
 }
 
 function isAllowedAppUrl(value) {
