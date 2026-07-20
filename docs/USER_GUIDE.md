@@ -2,13 +2,13 @@
 
 [简体中文](USER_GUIDE.zh-CN.md) · [Project README](../README.md) · [Security](../SECURITY.md)
 
-This guide applies to Local Ops v1.8.0 on Apple Silicon macOS.
+This guide applies to Local Ops v1.8.2 on Apple Silicon macOS.
 
 ## 1. Install, update, and open
 
 ### Install
 
-1. Download `Local-Ops-1.8.0-arm64.dmg` from GitHub Releases.
+1. Download `Local-Ops-1.8.2-arm64.dmg` from GitHub Releases.
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch the app from Applications.
 
@@ -101,6 +101,8 @@ The following command maps directly to the SSH tunnel form:
 ssh -NT \
   -o IdentitiesOnly=yes \
   -o ExitOnForwardFailure=yes \
+  -o ConnectTimeout=5 \
+  -o ConnectionAttempts=1 \
   -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=3 \
   -i ~/.ssh/example_vps \
@@ -117,7 +119,35 @@ Via deploy@203.0.113.10
 Local listener 127.0.0.1:3000  →  Forward target 127.0.0.1:3000
 ```
 
-Local Ops automatically adds `-NT`, `IdentitiesOnly`, `ExitOnForwardFailure`, and keepalive options. Managed listeners bind to `127.0.0.1` only.
+Local Ops automatically adds `-NT`, `IdentitiesOnly`, `ExitOnForwardFailure`, `ConnectTimeout=5`, `ConnectionAttempts=1`, and keepalive options. Managed listeners bind to `127.0.0.1` only. A failed or timed-out SSH attempt exits, then Process Compose waits about three seconds before the next attempt; Local Ops does not add a long fixed boot delay. The tunnel form no longer has a scheduler-autostart option: starts from the web UI, menu bar, or bulk controls retry up to 3 times, while tunnels restored by **Restore the Previous Session When the App Opens** retry up to 40 times.
+
+Before starting SSH automatically, Local Ops runs `ssh -G` to read the effective host configuration. An alias such as `frp-relay-01` is therefore resolved to its real `HostName/Port` first. Every connection round probes that endpoint first. An unreachable endpoint fails that round quickly, keeps the card **Connecting**, and reports the network wait under **SSH Host Network**. Process Compose starts the next round about three seconds later and enters SSH setup immediately once the endpoint recovers.
+
+### End-to-end health checks and states
+
+Configure a local HTTP URL that is reachable through the tunnel, for example:
+
+```text
+http://127.0.0.1:18080/
+```
+
+A listening local port does not prove the remote application is usable. Local Ops reports **Connected** only after this URL returns a valid HTTP response from 100 through 499. A 500 response, connection failure, or two-second timeout fails the check; repeated failures terminate the current SSH process and trigger automatic retry.
+
+- **Connecting**: includes waiting for network, establishing SSH, automatic retries, and a manual immediate retry. The primary button is disabled and stale error text is hidden.
+- **Connection Failed**: all 40 startup-restoration retries or all 3 manual retries ended without passing verification. The card shows the specific error and enables a yellow **Retry Now** button. Clicking it is a manual action and begins a new three-retry budget.
+- **Connected**: the real HTTP path is healthy; when a matching domain entry is configured, that entry must also be ready.
+- **Stopped**: the tunnel is disabled; its SSH process and local listener should be absent.
+
+Tunnel cards retain only four diagnostics: SSH Host Network, SSH Tunnel, Tunnel Health Check, and Domain Entry. Error text appears at the bottom only in **Connection Failed**; long errors scroll and remain available in a tooltip. Leaving the health URL blank falls back to a local TCP listener check, which cannot prove the remote target is reachable.
+
+If a Reverse Proxy target matches the tunnel's local listener, Local Ops automatically treats that route as the tunnel's complete domain entry and probes its actual URL, including the configured path. Entry checks accept 2xx / 3xx only: a wrong path returning 404 reports **Domain Entry: Not Ready** without restarting an otherwise healthy SSH tunnel. The UI distinguishes:
+
+- **SSH Tunnel: Connected** — the local health URL returned a valid response through the forward.
+- **Domain Entry: Ready** — the complete `.localhost` URL, including a protected entry path, returned success or redirect.
+
+The card reports **Connected** only when every configured layer above passes. If no reverse-proxy entry is configured, only the SSH tunnel health check is required.
+
+The entry comes from the existing reverse-proxy configuration. It is never hard-coded for one project and does not add a duplicate field to the SSH tunnel form.
 
 ### Encrypted private keys and Keychain
 
@@ -171,7 +201,7 @@ SSH terminal actions use the same user, host, port, key, and optional forwarding
 
 Both settings are off by default and are independent:
 
-- **Launch at Login** opens Local Ops after signing in to macOS.
+- **Launch at Login** starts Local Ops silently in the menu bar after signing in to macOS. It does not open the main window; use the menu-bar panel to show the console when needed.
 - **Restore the Previous Session When the App Opens** restores only custom services, SSH tunnels, and Docker containers that were actually running in the last captured session.
 
 Local Ops records state periodically and when the app quits. Resources that were off stay off. Terminal actions, reverse-proxy links, system control-plane processes, and monitored external services are not restored. If a resource no longer exists, it is skipped. Restore errors are written to desktop logs without blocking the rest of the app.
@@ -224,7 +254,7 @@ Use the overflow menu for process logs or **Open Logs** in the menu-bar footer.
 
 - **A service stops immediately**: inspect Logs and verify the working directory, executable, PATH, and start command.
 - **A health check is red**: confirm the endpoint listens locally and returns a status below 500.
-- **An SSH tunnel fails**: test the host in Terminal, verify the key path and file permissions, check that the local port is free, and confirm the Keychain passphrase indicator for encrypted keys.
+- **An SSH tunnel fails**: inspect its last connection error and next retry time, then test the host in Terminal, verify the key path and permissions, confirm the local port is free, and check that the configured HTTP health URL works through the forward. For encrypted keys, confirm the Keychain passphrase indicator too.
 - **Keychain asks repeatedly**: unlock the macOS login Keychain and save the passphrase again. Local Ops intentionally does not cache plaintext in files.
 - **A local domain does not open**: verify Caddy and the target, check the configured path, and enable portless access if the URL omits `:19080`.
 - **Portless access cannot start**: another process may own local port 80. Disable that listener and retry from the App.

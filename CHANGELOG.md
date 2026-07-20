@@ -4,6 +4,22 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-07-21
+
+### Fixed
+
+- Start login-launched builds silently in the menu bar without showing the Dock icon or main window until the user opens the console.
+- Prevent development-mode Electron runs from registering `Electron.app` as a macOS login item.
+- Make generated SSH connections fail within five seconds, attempt only once, and let Process Compose retry managed tunnels every three seconds.
+- Keep managed tunnels in the user-facing **Connecting** state during network wait, SSH setup, and automatic retry until their configured HTTP health check succeeds.
+- Remove per-tunnel scheduler autostart, cap every user-triggered connection at 3 retries, and give startup session restoration a separate 40-retry budget; only report **Connection Failed** after the active budget is exhausted.
+- Reduce tunnel cards to four clear states—Connected, Connecting, Connection Failed, and Stopped—and show a scrolling error only after a final failure.
+- Hide stale Process Compose PIDs after a managed process has stopped.
+- Make repeated start/stop requests idempotent so rapid UI actions cannot create duplicate SSH processes or surface a false server error.
+- Resolve effective SSH aliases and wait on the real `HostName/Port` before creating an automatic tunnel, exposing the network wait in diagnostics without reporting a false connection.
+- Keep the three-second retry cadence without a fixed boot delay, and make an unavailable SSH endpoint fail fast so Process Compose can count every retry against the configured limit.
+- Derive complete domain-entry checks from matching reverse-proxy routes and require every configured layer to pass before a tunnel card reports **Connected**.
+
 ## [1.8.1] - 2026-07-20
 
 ### Fixed
@@ -77,6 +93,7 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 - Added the self-contained Electron DMG, automatic backend installation, portless loopback access, and bundled Caddy / Process Compose binaries.
 
 [1.7.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.7.0
+[1.8.2]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.2
 [1.8.1]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.1
 [1.8.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.0
 [1.6.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.6.0

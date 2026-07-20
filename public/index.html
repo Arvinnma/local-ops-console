@@ -7,9 +7,9 @@
     <meta name="theme-color" content="#f4f7f5">
     <title>Local Ops · 本机服务控制台</title>
     <meta name="description" content="管理本机服务、SSH 隧道、Docker、终端任务和反向代理域名">
-    <link rel="stylesheet" href="/styles.css?v=1.8.0">
-    <link rel="stylesheet" href="/icon-library.css?v=1.8.0">
-    <script type="module" src="/app.js?v=1.8.0"></script>
+    <link rel="stylesheet" href="/styles.css?v=1.8.2">
+    <link rel="stylesheet" href="/icon-library.css?v=1.8.2">
+    <script type="module" src="/app.js?v=1.8.2"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -215,7 +215,7 @@
                 <div class="automation-copy"><h2>启动自动化</h2><p class="settings-intro">控制 App 登录启动，并按需恢复上次运行的资源。</p></div>
               </div>
               <div class="switch-list" id="startup-settings">
-                <label class="switch-row"><span><strong>开机自启动</strong><small>登录 macOS 后自动打开 Local Ops App</small></span><input type="checkbox" role="switch" data-setting-key="launchAppAtLogin"><i aria-hidden="true"></i></label>
+                <label class="switch-row"><span><strong>开机自启动</strong><small>登录 macOS 后在菜单栏静默启动，不显示主窗口</small></span><input type="checkbox" role="switch" data-setting-key="launchAppAtLogin"><i aria-hidden="true"></i></label>
                 <label class="switch-row"><span><strong>启动 App 时恢复上次运行状态</strong><small>仅恢复上次运行的服务、SSH 隧道和 Docker 容器</small></span><input type="checkbox" role="switch" data-setting-key="restoreLastSessionOnAppLaunch"><i aria-hidden="true"></i></label>
               </div>
             </section>
@@ -332,8 +332,9 @@
           <label>私钥口令（可选）<input type="password" name="tunnel-key-passphrase" autocomplete="new-password" placeholder="仅在私钥已加密时填写"></label>
           <p class="form-hint" data-passphrase-status="tunnel">口令只会保存到 macOS 钥匙串，不会写入配置、日志或导出文件。</p>
           <label class="check-row secret-clear-row" data-passphrase-clear-row="tunnel" hidden><input type="checkbox" name="tunnel-clear-passphrase"><span>删除钥匙串中已保存的私钥口令</span></label>
-          <p class="form-hint">可填写 ~/.ssh/密钥名；Local Ops 会自动加入 -NT、IdentitiesOnly、ExitOnForwardFailure 和断线保活参数。</p>
-          <label class="check-row"><input type="checkbox" name="tunnel-autostart" checked><span>服务调度器启动时自动连接，断线自动重连</span></label>
+          <label>HTTP 健康检查 URL（推荐）<input name="tunnel-health" placeholder="http://127.0.0.1:18080/"></label>
+          <p class="form-hint">填写后，只有收到有效 HTTP 响应才会显示“已连接”。每次失败后间隔 3 秒重试；手动启动最多重试 3 次，开机恢复上次运行状态时最多重试 40 次。留空时仅检查本地 TCP 监听。</p>
+          <p class="form-hint">可填写 ~/.ssh/密钥名；Local Ops 会自动加入快速连接超时、单次尝试、非交互认证、转发失败退出和断线保活参数。</p>
         </div>
 
         <div class="form-panel" data-form-panel="route">
@@ -383,7 +384,7 @@
             <label>私钥口令（可选）<input type="password" name="terminal-key-passphrase" autocomplete="new-password" placeholder="仅在私钥已加密时填写"></label>
             <p class="form-hint" data-passphrase-status="terminal">口令只会保存到 macOS 钥匙串，不会写入配置、日志或导出文件。</p>
             <label class="check-row secret-clear-row" data-passphrase-clear-row="terminal" hidden><input type="checkbox" name="terminal-clear-passphrase"><span>删除钥匙串中已保存的私钥口令</span></label>
-            <p class="form-hint">仅连接服务器时，下面三个转发字段可以留空。转发时会自动加入 -NT、IdentitiesOnly、ExitOnForwardFailure 和保活参数。</p>
+          <p class="form-hint">仅连接服务器时，下面三个转发字段可以留空。SSH 连接会自动加入 5 秒连接超时和单次尝试；转发还会加入 -NT、IdentitiesOnly、ExitOnForwardFailure 和保活参数。</p>
             <div class="forward-grid">
               <label>本地端口<input name="terminal-local-port" inputmode="numeric" placeholder="15432"></label>
               <span aria-hidden="true">→</span>

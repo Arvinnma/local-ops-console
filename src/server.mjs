@@ -13,6 +13,8 @@ import {
   SSH_ASKPASS_PATH,
   SYSTEM_PROCESS_DEFINITIONS,
   TOKEN_PATH,
+  TUNNEL_MANUAL_RETRY_LIMIT,
+  TUNNEL_STARTUP_RETRY_LIMIT,
   WORKER_COMPOSE_PATH,
   applyPortableConfigImport,
   buildTerminalAppleScript,
@@ -38,6 +40,7 @@ import {
   readPrivateKeyPassphrase,
   storePrivateKeyPassphrase
 } from "./keychain.mjs";
+import { enrichTunnelProcess, pruneTunnelRuntime, resetTunnelRuntime } from "./tunnel-health.mjs";
 
 const execFileAsync = promisify(execFile);
 const PUBLIC_DIR = path.join(ROOT, "public");
@@ -55,6 +58,9 @@ const CONTENT_TYPES = {
 };
 
 let mutationQueue = Promise.resolve();
+let workerConfigQueue = Promise.resolve();
+const processActionQueues = new Map();
+const tunnelRetryLimits = new Map();
 let stateCache = { at: 0, value: null };
 let dockerCache = { at: 0, value: null };
 let sessionCapturePromise = null;
@@ -104,6 +110,10 @@ const server = http.createServer(async (request, response) => {
         throw httpError(403, "控制台自身不能从网页停止");
       }
       if (definition.kind === "tunnel" && action !== "stop") await assertPassphraseAvailable(definition);
+      if (definition.kind === "tunnel" && action !== "stop") {
+        await configureTunnelRetryLimits(catalog, [id], TUNNEL_MANUAL_RETRY_LIMIT);
+      }
+      if (definition.kind === "tunnel") resetTunnelRuntime(id);
       await processAction(catalog, id, action);
       invalidateState();
       return sendJson(response, 200, { ok: true, id, action });
@@ -459,13 +469,41 @@ async function getState(catalog, force = false) {
     orchestrator = { online: false, workerOnline: false, error: cleanError(error) };
   }
 
+  const routes = catalog.routes.map((route) => ({ ...route, url: routeUrl(catalog, route) }));
   const definitions = processDefinitions(catalog);
   const rawByName = new Map(rawProcesses.map((item) => [String(item.name || item.process || item.process_name), item]));
-  const processes = definitions.map((definition) => normalizeProcess(definition, rawByName.get(definition.id)));
+  pruneTunnelRuntime(catalog.tunnels.map((item) => item.id));
+  const processes = await Promise.all(definitions.map(async (definition) => {
+    const process = normalizeProcess(definition, rawByName.get(definition.id));
+    if (definition.kind !== "tunnel") return process;
+    const enriched = await enrichTunnelProcess(definition, process, {
+      readLogs: () => processLogs(catalog, definition.id, 40),
+      entryRoutes: routes.filter((route) => routeTargetsTunnel(route, definition)),
+      retryLimit: activeTunnelRetryLimit(definition.id)
+    });
+    if (enriched.active && enriched.retryLimit) tunnelRetryLimits.set(definition.id, enriched.retryLimit);
+    return enriched;
+  }));
   const external = await Promise.all(catalog.externalServices.map(probeExternal));
-  const routes = catalog.routes.map((route) => ({ ...route, url: routeUrl(catalog, route) }));
-  const running = processes.filter((item) => item.status === "running").length;
-  const unhealthy = processes.filter((item) => item.health === "unhealthy").length;
+  const routeStates = routes.map((route) => {
+    const tunnel = processes.find((item) => (
+      item.kind === "tunnel" && item.domainEntry?.checks?.some((check) => check.id === route.id)
+    ));
+    const entryCheck = tunnel?.domainEntry?.checks?.find((check) => check.id === route.id);
+    return {
+      ...route,
+      linkedTunnelId: tunnel?.id || null,
+      entryReady: entryCheck ? Boolean(entryCheck.ok && tunnel?.healthCheck?.ok) : null,
+      fullyAvailable: entryCheck ? Boolean(entryCheck.ok && tunnel?.fullyAvailable) : null,
+      entryStatusCode: entryCheck?.statusCode ?? null,
+      entryLatencyMs: entryCheck?.latencyMs ?? null,
+      entryError: entryCheck?.error || ""
+    };
+  });
+  const running = processes.filter((item) => (
+    item.kind === "tunnel" ? item.status === "connected" : item.status === "running"
+  )).length;
+  const unhealthy = processes.filter((item) => ["unhealthy", "degraded"].includes(item.health)).length;
   const value = {
     generatedAt: new Date().toISOString(),
     orchestrator,
@@ -475,11 +513,11 @@ async function getState(catalog, force = false) {
       stopped: processes.length - running,
       unhealthy,
       externalOnline: external.filter((item) => item.online).length,
-      routes: routes.filter((item) => item.enabled).length
+      routes: routeStates.filter((item) => item.enabled).length
     },
     processes,
     external,
-    routes,
+    routes: routeStates,
     system: {
       hostname: os.hostname(),
       platform: `${os.type()} ${os.release()}`,
@@ -491,6 +529,12 @@ async function getState(catalog, force = false) {
   };
   stateCache = { at: now, value };
   return value;
+}
+
+function routeTargetsTunnel(route, tunnel) {
+  const match = /^(127\.0\.0\.1|localhost|\[::1\]):(\d{1,5})$/.exec(String(route.target || ""));
+  if (!match) return false;
+  return Number(match[2]) === Number(tunnel.localPort);
 }
 
 async function getDockerState(force = false) {
@@ -651,13 +695,35 @@ async function applyAppStartupActions(catalog) {
     ...catalog.tunnels.filter((item) => rememberedTunnelIds.has(item.id))
   ];
   const errors = [];
+  const startupTunnelIds = [];
+  for (const tunnel of catalog.tunnels) {
+    if (!rememberedTunnelIds.has(tunnel.id) || processMap.get(tunnel.id)?.active) continue;
+    try {
+      await assertPassphraseAvailable(tunnel);
+      startupTunnelIds.push(tunnel.id);
+    } catch (error) {
+      errors.push(`${tunnel.name || tunnel.id}：${cleanError(error)}`);
+    }
+  }
+  const startupTunnelSet = new Set(startupTunnelIds);
+  if (startupTunnelIds.length) {
+    try {
+      await configureTunnelRetryLimits(catalog, startupTunnelIds, TUNNEL_STARTUP_RETRY_LIMIT);
+    } catch (error) {
+      errors.push(`SSH 隧道开机恢复：${cleanError(error)}`);
+      startupTunnelSet.clear();
+    }
+  }
   let services = 0;
   let tunnels = 0;
   for (const item of targets) {
-    if (processMap.get(item.id)?.status === "running") continue;
+    if (processMap.get(item.id)?.active) continue;
+    const tunnel = catalog.tunnels.some((candidate) => candidate.id === item.id);
+    if (tunnel && !startupTunnelSet.has(item.id)) continue;
     try {
+      if (tunnel) resetTunnelRuntime(item.id);
       await processAction(catalog, item.id, "start");
-      if (catalog.tunnels.some((tunnel) => tunnel.id === item.id)) tunnels += 1;
+      if (tunnel) tunnels += 1;
       else services += 1;
     } catch (error) {
       errors.push(`${item.name || item.id}：${cleanError(error)}`);
@@ -689,10 +755,10 @@ function captureLastSessionState(catalog) {
     const processMap = new Map(state.processes.map((item) => [item.id, item]));
     const workerReadable = state.orchestrator.workerOnline !== false;
     const services = workerReadable
-      ? catalog.services.filter((item) => processMap.get(item.id)?.status === "running").map((item) => item.id)
+      ? catalog.services.filter((item) => processMap.get(item.id)?.active).map((item) => item.id)
       : previous.services;
     const tunnels = workerReadable
-      ? catalog.tunnels.filter((item) => processMap.get(item.id)?.status === "running").map((item) => item.id)
+      ? catalog.tunnels.filter((item) => processMap.get(item.id)?.active).map((item) => item.id)
       : previous.tunnels;
     const dockerContainers = docker.available
       ? docker.daemonOnline
@@ -790,13 +856,17 @@ function dockerReferenceMatches(reference, container) {
 
 function normalizeProcess(definition, raw = {}) {
   const rawStatus = String(raw.status || raw.state || (raw.is_running ? "running" : "unknown")).toLowerCase();
-  const status = rawStatus.includes("running") || rawStatus.includes("ready")
-    ? "running"
-    : rawStatus.includes("disabled")
-      ? "disabled"
-      : rawStatus.includes("completed") || rawStatus.includes("stopped") || rawStatus.includes("exit")
-        ? "stopped"
-        : "unknown";
+  const restarting = rawStatus.includes("restart") || rawStatus === "starting";
+  const running = rawStatus.includes("running") || rawStatus.includes("ready") || Boolean(raw.is_running);
+  const status = restarting
+    ? "restarting"
+    : running
+      ? "running"
+      : rawStatus.includes("disabled")
+        ? "disabled"
+        : rawStatus.includes("completed") || rawStatus.includes("stopped") || rawStatus.includes("exit")
+          ? "stopped"
+          : "unknown";
   const rawHealth = String(raw.health || raw.health_status || raw.is_ready || "").toLowerCase();
   const health = rawHealth.includes("unhealthy") || rawHealth.includes("not ready")
     ? "unhealthy"
@@ -813,12 +883,16 @@ function normalizeProcess(definition, raw = {}) {
     protected: Boolean(definition.protected),
     status,
     health,
-    pid: raw.pid || raw.process_id || null,
+    active: running || restarting,
+    pid: running || restarting ? raw.pid || raw.process_id || null : null,
     restarts: Number(raw.restarts || raw.restart_count || 0),
     cpu: raw.cpu || raw.cpu_percent || "",
     memory: raw.memory || raw.memory_usage || raw.mem || "",
     exitCode: raw.exit_code ?? raw.exitCode ?? null,
-    rawStatus
+    rawStatus,
+    lastActivityAt: raw.last_activity_time || null,
+    startedAt: raw.process_start_time || null,
+    readyAt: raw.process_ready_time || null
   };
 }
 
@@ -867,7 +941,25 @@ async function processLogs(catalog, id, tail) {
 
 async function processAction(catalog, id, action) {
   const definition = assertKnownProcess(catalog, id);
-  await runProcessCompose(catalog, ["process", action, id], definition.kind === "system" ? "core" : "worker");
+  const previous = processActionQueues.get(id) || Promise.resolve();
+  const task = previous.catch(() => {}).then(async () => {
+    const role = definition.kind === "system" ? "core" : "worker";
+    if (action === "start" || action === "stop") {
+      const rawProcesses = await processList(catalog, role);
+      const raw = rawProcesses.find((item) => String(item.name || item.process || item.process_name) === id);
+      const current = normalizeProcess(definition, raw);
+      if (action === "start" && current.active) return { skipped: true };
+      if (action === "stop" && !current.active) return { skipped: true };
+    }
+    await runProcessCompose(catalog, ["process", action, id], role);
+    return { skipped: false };
+  });
+  processActionQueues.set(id, task);
+  try {
+    return await task;
+  } finally {
+    if (processActionQueues.get(id) === task) processActionQueues.delete(id);
+  }
 }
 
 async function launchTerminalTask(task) {
@@ -1028,7 +1120,7 @@ function enqueueMutation(mutator) {
     mutator(next);
     validateCatalog(next);
     saveCatalog(next);
-    renderAll(next);
+    renderRuntimeConfig(next);
     const workerChanged = JSON.stringify([before.services, before.tunnels]) !== JSON.stringify([next.services, next.tunnels]);
     const caddyChanged = JSON.stringify(caddySignature(before)) !== JSON.stringify(caddySignature(next));
     try {
@@ -1037,7 +1129,7 @@ function enqueueMutation(mutator) {
       return next;
     } catch (error) {
       saveCatalog(before);
-      renderAll(before);
+      renderRuntimeConfig(before);
       try { await applyRuntimeConfig(before, workerChanged, caddyChanged); } catch {}
       throw error;
     }
@@ -1061,7 +1153,7 @@ function enqueueCatalogMutation(mutator) {
 async function applyRuntimeConfig(catalog, updateWorker = true, updateCaddy = true) {
   if (updateCaddy) await runTool(BINARIES.caddy, ["validate", "--config", CADDYFILE_PATH, "--adapter", "caddyfile"]);
   if (updateWorker) {
-    await runProcessCompose(catalog, ["project", "update", "--config", WORKER_COMPOSE_PATH], "worker");
+    await updateWorkerRuntimeConfig(catalog);
   }
   if (updateCaddy) {
     await runTool(BINARIES.caddy, [
@@ -1069,6 +1161,56 @@ async function applyRuntimeConfig(catalog, updateWorker = true, updateCaddy = tr
       "--address", `127.0.0.1:${catalog.settings.caddyAdminPort}`
     ]);
   }
+}
+
+function activeTunnelRetryLimit(id) {
+  return tunnelRetryLimits.get(id);
+}
+
+function runtimeRenderOptions(catalog) {
+  const ids = new Set(catalog.tunnels.map((item) => item.id));
+  for (const id of tunnelRetryLimits.keys()) {
+    if (!ids.has(id)) tunnelRetryLimits.delete(id);
+  }
+  return { tunnelRetryLimits: new Map(tunnelRetryLimits) };
+}
+
+function renderRuntimeConfig(catalog) {
+  return renderAll(catalog, runtimeRenderOptions(catalog));
+}
+
+function enqueueWorkerConfig(operation) {
+  const task = workerConfigQueue.catch(() => {}).then(operation);
+  workerConfigQueue = task.catch(() => {});
+  return task;
+}
+
+function updateWorkerRuntimeConfig(catalog) {
+  return enqueueWorkerConfig(async () => {
+    renderRuntimeConfig(catalog);
+    await runProcessCompose(catalog, ["project", "update", "--config", WORKER_COMPOSE_PATH], "worker");
+  });
+}
+
+function configureTunnelRetryLimits(catalog, ids, limit) {
+  return enqueueWorkerConfig(async () => {
+    const previous = new Map(ids.map((id) => [id, {
+      exists: tunnelRetryLimits.has(id),
+      value: tunnelRetryLimits.get(id)
+    }]));
+    for (const id of ids) tunnelRetryLimits.set(id, limit);
+    try {
+      renderRuntimeConfig(catalog);
+      await runProcessCompose(catalog, ["project", "update", "--config", WORKER_COMPOSE_PATH], "worker");
+    } catch (error) {
+      for (const [id, state] of previous) {
+        if (state.exists) tunnelRetryLimits.set(id, state.value);
+        else tunnelRetryLimits.delete(id);
+      }
+      renderRuntimeConfig(catalog);
+      throw error;
+    }
+  });
 }
 
 function caddySignature(catalog) {

@@ -158,7 +158,8 @@ function scheduleOverflowRefresh() {
 
 function renderStatus(item) {
   const status = document.createElement("span");
-  const stateClass = item.busy ? "is-busy" : item.running ? "is-running" : "is-stopped";
+  const tone = item.tone || (item.busy ? "busy" : item.running ? "running" : "stopped");
+  const stateClass = `is-${tone}`;
   status.className = `resource-status ${stateClass}`;
 
   const text = document.createElement("span");

@@ -96,13 +96,49 @@ try {
   assert.ok(menu.popup.right <= menu.viewport.width && menu.popup.bottom <= menu.viewport.height, `Action menu overflows the viewport: ${JSON.stringify(menu)}`);
   assert.ok(Math.abs(menu.popup.top - menu.trigger.bottom) < 260 || Math.abs(menu.trigger.top - menu.popup.bottom) < 260, "Action menu is not anchored near its trigger");
 
+  const tunnels = await cdp.evaluate(`(async () => {
+    document.querySelector('[data-view="tunnels"]')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    return [...document.querySelectorAll("#tunnel-cards .tunnel-card")].map((card) => {
+      const state = [...card.querySelector(".tunnel-card-head .status-pill").classList]
+        .find((name) => ["connected", "connecting", "connection_failed", "stopped"].includes(name));
+      const primary = card.querySelector(".tunnel-card-foot .row-actions > .mini-button:first-child");
+      return {
+        state,
+        diagnosticCount: card.querySelectorAll(".tunnel-runtime > div").length,
+        hasError: Boolean(card.querySelector(".tunnel-error-line")),
+        primaryDisabled: Boolean(primary?.disabled),
+        primaryAction: primary?.dataset.action || "",
+        primaryClasses: [...(primary?.classList || [])]
+      };
+    });
+  })()`);
+  assert.ok(tunnels.length > 0, "No SSH tunnel cards rendered");
+  for (const tunnel of tunnels) {
+    assert.ok(tunnel.state, `Tunnel exposed an unsupported state: ${JSON.stringify(tunnel)}`);
+    assert.equal(tunnel.diagnosticCount, 4, "Tunnel cards must retain exactly four diagnostic fields");
+    assert.equal(tunnel.hasError, tunnel.state === "connection_failed", "Only final tunnel failures may display error text");
+    if (tunnel.state === "connecting") {
+      assert.equal(tunnel.primaryDisabled, true, "Connecting tunnel action must be disabled");
+      assert.ok(tunnel.primaryClasses.includes("action-pending"), "Connecting tunnel action must use the grey pending style");
+    }
+    if (tunnel.state === "connection_failed") {
+      assert.equal(tunnel.primaryAction, "retry-tunnel", "Failed tunnel must expose immediate retry");
+      assert.ok(tunnel.primaryClasses.includes("action-restart"), "Failed tunnel retry must use the yellow style");
+    }
+    if (tunnel.state === "connected") assert.equal(tunnel.primaryAction, "stop", "Connected tunnel must expose stop");
+    if (tunnel.state === "stopped") assert.equal(tunnel.primaryAction, "start", "Stopped tunnel must expose start");
+  }
+
   await cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 720,
     height: 900,
     deviceScaleFactor: 1,
     mobile: false
   });
-  const responsive = await cdp.evaluate(`(() => {
+  const responsive = await cdp.evaluate(`(async () => {
+    document.querySelector('[data-view="services"]')?.click();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const wrapper = document.querySelector('[data-page="services"] .table-wrap');
     return {
       overflowX: getComputedStyle(wrapper).overflowX,
@@ -118,10 +154,14 @@ try {
   assert.doesNotMatch(chromeStderr, /content security policy/i);
 
   cdp.close();
-  console.log("Browser QA passed: strict CSP, icon colors, anchored action menu, and narrow-table scrolling");
+  console.log("Browser QA passed: strict CSP, icons, action menus, tunnel state controls, and narrow-table scrolling");
 } finally {
-  if (chrome && chrome.exitCode == null) chrome.kill("SIGTERM");
-  await fs.rm(profile, { recursive: true, force: true });
+  if (chrome && chrome.exitCode == null) {
+    const exited = new Promise((resolve) => chrome.once("exit", resolve));
+    chrome.kill("SIGTERM");
+    await Promise.race([exited, delay(3000)]);
+  }
+  await fs.rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 }
 
 async function waitForFile(file, timeout = 10000) {

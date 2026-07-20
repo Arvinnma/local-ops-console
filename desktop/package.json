@@ -1,6 +1,6 @@
 {
   "name": "local-ops-desktop",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "Native macOS shell for the Local Ops control plane",
   "private": true,
   "main": "main.cjs",
@@ -27,6 +27,7 @@
     "asar": true,
     "files": [
       "main.cjs",
+      "startup-mode.cjs",
       "window-lifecycle.cjs",
       "preload.cjs",
       "splash.html",
@@ -54,7 +55,7 @@
     },
     "afterPack": "scripts/after-pack.cjs",
     "mac": {
-      "bundleVersion": "1.8.1",
+      "bundleVersion": "1.8.2",
       "target": [
         {
           "target": "dmg",

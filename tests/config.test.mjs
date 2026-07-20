@@ -17,6 +17,7 @@ import {
   normalizeTerminalTask,
   normalizeTunnel,
   renderSshCommand,
+  renderWorkerCompose,
   renderAll,
   routeUrl
 } from "../src/config.mjs";
@@ -76,6 +77,72 @@ test("normalizes a safe SSH tunnel", () => {
   assert.equal(tunnel.id, "production-db");
   assert.equal(tunnel.bindAddress, "127.0.0.1");
   assert.equal(tunnel.sshPort, 22);
+  assert.equal(tunnel.healthUrl, "");
+  assert.equal("autoStart" in tunnel, false);
+});
+
+test("renders manually started SSH tunnels with three retries and no scheduler autostart", () => {
+  const catalog = structuredClone(loadCatalog());
+  catalog.tunnels = [normalizeTunnel({
+    id: "panel-test",
+    name: "Panel Test",
+    sshHost: "example.com",
+    sshUser: "ubuntu",
+    localPort: 18080,
+    remoteHost: "127.0.0.1",
+    remotePort: 10081,
+    healthUrl: "http://127.0.0.1:18080/"
+  })];
+  const compose = renderWorkerCompose(catalog);
+  assert.match(compose, /ConnectTimeout=5/);
+  assert.match(compose, /ConnectionAttempts=1/);
+  assert.match(compose, /BatchMode=yes/);
+  assert.match(compose, /backoff_seconds: 3/);
+  assert.match(compose, /max_restarts: 3/);
+  assert.match(compose, /disabled: true/);
+  assert.match(compose, /--retry-limit '3'/);
+  assert.match(compose, /run-managed-tunnel\.mjs/);
+  assert.match(compose, /--host.*example\.com/);
+  assert.match(compose, /--allow-waiting-network/);
+  assert.match(compose, /--connecting-grace-ms 7000/);
+  assert.match(compose, /readiness_probe:/);
+  assert.match(compose, /liveness_probe:/);
+  assert.match(compose, /tunnel-http-health\.mjs/);
+  assert.match(compose, /http:\/\/127\.0\.0\.1:18080\//);
+  assert.match(compose, /period_seconds: 3/);
+});
+
+test("startup-restored SSH tunnels use a forty-retry runtime policy", () => {
+  const catalog = structuredClone(loadCatalog());
+  catalog.tunnels = [normalizeTunnel({
+    id: "manual-tunnel",
+    name: "Manual Tunnel",
+    sshHost: "example.com",
+    sshUser: "ubuntu",
+    localPort: 18081,
+    remoteHost: "127.0.0.1",
+    remotePort: 10082
+  })];
+  const compose = renderWorkerCompose(catalog, {
+    tunnelRetryLimits: new Map([["manual-tunnel", 40]])
+  });
+  assert.match(compose, /restart: "always"/);
+  assert.match(compose, /backoff_seconds: 3/);
+  assert.match(compose, /max_restarts: 40/);
+  assert.match(compose, /disabled: true/);
+  assert.match(compose, /--retry-limit '40'/);
+});
+
+test("rejects non-local tunnel health checks", () => {
+  assert.throws(() => normalizeTunnel({
+    name: "Unsafe health",
+    sshHost: "example.com",
+    sshUser: "ubuntu",
+    localPort: 18080,
+    remoteHost: "127.0.0.1",
+    remotePort: 10081,
+    healthUrl: "https://example.com/health"
+  }), /健康检查只能访问本机地址/);
 });
 
 test("renders Keychain AskPass for encrypted SSH identities without embedding a passphrase", () => {
@@ -94,6 +161,8 @@ test("uses non-interactive SSH for a background tunnel without a saved passphras
     "/usr/bin/ssh", "-N", "-T", "ubuntu@example.com"
   ], "", true);
   assert.match(command, /BatchMode=yes/);
+  assert.match(command, /ConnectTimeout=5/);
+  assert.match(command, /ConnectionAttempts=1/);
   assert.doesNotMatch(command, /SSH_ASKPASS=/);
 });
 

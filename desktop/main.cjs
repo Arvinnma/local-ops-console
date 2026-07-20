@@ -6,6 +6,12 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
+const {
+  canManageLoginItem,
+  createLoginItemSettings,
+  createStartupPresentation,
+  shouldStartSilently
+} = require("./startup-mode.cjs");
 const { bringWindowToFront } = require("./window-lifecycle.cjs");
 
 const execFileAsync = promisify(execFile);
@@ -46,6 +52,8 @@ let quitCaptureCompleted = false;
 let isOnline = false;
 let installPromise = null;
 let startupActionsApplied = false;
+let startupInitializationComplete = false;
+let startupPresentation = createStartupPresentation(false);
 
 fs.mkdirSync(LOG_DIR, { recursive: true });
 app.setName("Local Ops");
@@ -77,7 +85,18 @@ app.on("before-quit", (event) => {
 });
 
 app.whenReady().then(async () => {
+  const launchLoginItem = readLoginItemSettings();
+  startupPresentation = createStartupPresentation(shouldStartSilently({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    wasOpenedAtLogin: launchLoginItem.wasOpenedAtLogin,
+    requestedSilent: process.argv.includes("--local-ops-silent-start")
+  }));
   applyDockIcon();
+  if (startupPresentation.isSilent() && process.platform === "darwin" && app.dock) {
+    app.dock.hide();
+    log("login launch detected: starting silently in the menu bar");
+  }
   configureSecurity();
   configureIpc();
   configureAboutPanel();
@@ -86,6 +105,7 @@ app.whenReady().then(async () => {
   createMainWindow();
   await connectControlPlane();
   startHealthMonitor();
+  startupInitializationComplete = true;
   if (!app.isPackaged && process.env.LOCAL_OPS_TRAY_PREVIEW === "1") {
     mainWindow?.hide();
     toggleTrayPanel();
@@ -133,6 +153,7 @@ function applyDockIcon() {
 }
 
 app.on("activate", () => {
+  if (startupPresentation.isSilent() && !startupInitializationComplete) return;
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
   showMainWindow();
 });
@@ -178,7 +199,9 @@ function createMainWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "splash.html"), { query: { lang: desktopLanguage() } });
-  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.once("ready-to-show", () => {
+    if (startupPresentation.shouldShowWindow()) mainWindow?.show();
+  });
 
   mainWindow.on("close", (event) => {
     if (!isQuitting) {
@@ -440,7 +463,7 @@ function buildTrayMenu() {
   const routes = config.routes || [];
   const terminalTasks = config.terminalTasks || [];
   const runningServices = services.filter((item) => processById.get(item.id)?.status === "running").length;
-  const runningTunnels = tunnels.filter((item) => processById.get(item.id)?.status === "running").length;
+  const runningTunnels = tunnels.filter((item) => tunnelPresentationState(processById.get(item.id)) === "connected").length;
   const containers = docker.containers || [];
   const runningContainers = containers.filter((item) => item.running).length;
 
@@ -470,18 +493,18 @@ function managedProcessMenu(definitions, processById, kind) {
   if (!definitions.length) return [{ label: trayText("尚未配置", "Not Configured"), enabled: false }];
   return definitions.map((definition) => {
     const processState = processById.get(definition.id);
-    const running = processState?.status === "running";
-    const action = running ? "stop" : "start";
+    const active = processIsActive(processState);
+    const action = active ? "stop" : "start";
     const actionKey = `process:${definition.id}`;
     return {
-      label: trayResourceLabel(definition.name || definition.id, running, trayActionsInFlight.has(actionKey)),
+      label: trayManagedResourceLabel(definition.name || definition.id, processState, kind, trayActionsInFlight.has(actionKey)),
       enabled: isOnline && !trayActionsInFlight.has(actionKey),
       click: () => void performTrayMutation(
         actionKey,
         `/api/processes/${encodeURIComponent(definition.id)}/${action}`,
         trayText(
-          `${running ? "停止" : "启动"}${kind === "tunnel" ? " SSH 隧道" : "服务"}失败`,
-          `Failed to ${running ? "stop" : "start"} ${kind === "tunnel" ? "SSH tunnel" : "service"}`
+          `${active ? "停止" : "启动"}${kind === "tunnel" ? " SSH 隧道" : "服务"}失败`,
+          `Failed to ${active ? "stop" : "start"} ${kind === "tunnel" ? "SSH tunnel" : "service"}`
         )
       )
     };
@@ -558,6 +581,37 @@ function trayResourceLabel(name, running, busy = false) {
   return trayStatusLabel(name, status);
 }
 
+function trayManagedResourceLabel(name, processState, kind, busy = false) {
+  if (busy) return trayStatusLabel(name, trayText("处理中 🟡", "Working 🟡"));
+  if (kind !== "tunnel") return trayResourceLabel(name, processIsActive(processState));
+  const displayState = tunnelPresentationState(processState);
+  const status = ({
+    connected: trayText("已连接 🟢", "Connected 🟢"),
+    connecting: trayText("连接中 🟡", "Connecting 🟡"),
+    connection_failed: trayText("连接失败 🔴", "Connection Failed 🔴"),
+    stopped: trayText("已停止 🔴", "Stopped 🔴")
+  })[displayState];
+  return trayStatusLabel(name, status);
+}
+
+function tunnelPresentationState(processState) {
+  const status = String(processState?.status || "unknown");
+  if (status === "disabled" || status === "stopped" || !processState) return "stopped";
+  const healthReady = Boolean(processState.healthCheck?.ok);
+  const domainReady = !processState.domainEntry?.configured || Boolean(processState.domainEntry?.ready);
+  if (status === "connected" && healthReady && domainReady) return "connected";
+  if (status === "connection_failed" || (status === "connected" && healthReady && !domainReady && processState.domainEntry?.terminal)) {
+    return "connection_failed";
+  }
+  return processIsActive(processState) || ["waiting_network", "connecting", "retrying", "restarting", "running"].includes(status)
+    ? "connecting"
+    : "connection_failed";
+}
+
+function processIsActive(processState) {
+  return Boolean(processState?.active ?? processState?.status === "running");
+}
+
 function trayReadyLabel(name, busy = false) {
   return trayStatusLabel(name, busy ? trayText("执行中 🟡", "Running 🟡") : trayText("就绪 🟢", "Ready 🟢"));
 }
@@ -609,20 +663,35 @@ function buildTrayPanelState() {
   const routes = config.routes || [];
   const containers = docker.containers || [];
   const runningServices = services.filter((item) => processById.get(item.id)?.status === "running").length;
-  const runningTunnels = tunnels.filter((item) => processById.get(item.id)?.status === "running").length;
+  const runningTunnels = tunnels.filter((item) => tunnelPresentationState(processById.get(item.id)) === "connected").length;
   const runningContainers = containers.filter((item) => item.running).length;
 
   const managedItems = (definitions, kind) => definitions.map((definition) => {
     const actionKey = `process:${definition.id}`;
-    const running = processById.get(definition.id)?.status === "running";
+    const processState = processById.get(definition.id);
+    const active = processIsActive(processState);
+    const tunnelState = kind === "tunnel" ? tunnelPresentationState(processState) : null;
+    const connected = kind === "tunnel" ? tunnelState === "connected" : processState?.status === "running";
     const busy = trayActionsInFlight.has(actionKey);
+    const status = busy
+      ? t("处理中", "Working")
+      : kind === "tunnel"
+          ? ({
+            connected: t("已连接", "Connected"),
+            connecting: t("连接中", "Connecting"),
+            connection_failed: t("连接失败", "Connection Failed"),
+            stopped: t("已停止", "Stopped")
+          })[tunnelState]
+        : connected ? t("已开启", "On") : t("已关闭", "Off");
     return {
       id: definition.id,
       name: definition.name || definition.id,
-      running,
+      running: connected,
+      active,
       busy,
       disabled: !isOnline,
-      status: busy ? t("处理中", "Working") : running ? t("已开启", "On") : t("已关闭", "Off"),
+      tone: busy || tunnelState === "connecting" ? "busy" : connected ? "running" : "stopped",
+      status,
       action: { type: "process", id: definition.id, kind }
     };
   });
@@ -791,13 +860,13 @@ async function performTrayPanelAction(payload = {}) {
     const definitions = [...(config.services || []), ...(config.tunnels || [])];
     const definition = definitions.find((item) => item.id === String(payload.id || ""));
     if (!definition) throw new Error("没有找到该服务或 SSH 隧道");
-    const running = processById.get(definition.id)?.status === "running";
-    const action = running ? "stop" : "start";
+    const active = processIsActive(processById.get(definition.id));
+    const action = active ? "stop" : "start";
     await runTrayMutation(
       `process:${definition.id}`,
       `/api/processes/${encodeURIComponent(definition.id)}/${action}`
     );
-    return { message: trayText(`${definition.name || definition.id} 已${running ? "关闭" : "开启"}`, `${definition.name || definition.id} ${running ? "stopped" : "started"}`) };
+    return { message: trayText(`${definition.name || definition.id} 已${active ? "关闭" : "开启"}`, `${definition.name || definition.id} ${active ? "stopped" : "started"}`) };
   }
 
   if (type === "terminal") {
@@ -883,9 +952,12 @@ function trayTooltip() {
   if (!traySnapshot) return `Local Ops · ${trayText("正在读取资源", "Loading Resources")}`;
   const config = traySnapshot.bootstrap.config || {};
   const processById = new Map((traySnapshot.state.processes || []).map((item) => [item.id, item]));
-  const definitions = [...(config.services || []), ...(config.tunnels || [])];
-  const running = definitions.filter((item) => processById.get(item.id)?.status === "running").length;
-  return `Local Ops · ${trayText(`${running}/${definitions.length} 个资源运行中`, `${running}/${definitions.length} resources running`)}`;
+  const services = config.services || [];
+  const tunnels = config.tunnels || [];
+  const running = services.filter((item) => processById.get(item.id)?.status === "running").length
+    + tunnels.filter((item) => tunnelPresentationState(processById.get(item.id)) === "connected").length;
+  const total = services.length + tunnels.length;
+  return `Local Ops · ${trayText(`${running}/${total} 个资源运行中`, `${running}/${total} resources running`)}`;
 }
 
 function trayText(zh, en) {
@@ -954,7 +1026,7 @@ async function connectControlPlane() {
     await loadConsole();
     updateTray(true);
     void applyAppStartupActionsOnce();
-    void maybeOfferPortlessAccess();
+    if (startupPresentation.shouldShowWindow()) void maybeOfferPortlessAccess();
   } catch (error) {
     log(`connect failed: ${error.message}`);
     updateTray(false);
@@ -1042,8 +1114,7 @@ function configureIpc() {
   });
   ipcMain.handle("local-ops:set-login-item", async (event, enabled) => {
     assertTrustedRenderer(event);
-    app.setLoginItemSettings({ openAtLogin: Boolean(enabled), openAsHidden: false });
-    return getLoginItemStatus();
+    return setLoginItemEnabled(enabled);
   });
   ipcMain.handle("local-ops:save-config-file", async (event, payload = {}) => {
     assertTrustedRenderer(event);
@@ -1083,20 +1154,34 @@ function assertTrustedRenderer(event) {
 }
 
 function getLoginItemStatus() {
-  const current = app.getLoginItemSettings();
+  const available = canManageLoginItem(process.platform, app.isPackaged);
+  const current = available ? readLoginItemSettings() : {};
   return {
-    available: process.platform === "darwin" && app.isPackaged,
-    enabled: Boolean(current.openAtLogin),
-    wasOpenedAtLogin: Boolean(current.wasOpenedAtLogin)
+    available,
+    enabled: available && Boolean(current.openAtLogin),
+    wasOpenedAtLogin: available && Boolean(current.wasOpenedAtLogin)
   };
 }
 
+function readLoginItemSettings() {
+  try {
+    return app.getLoginItemSettings();
+  } catch (error) {
+    log(`login item status unavailable: ${error.message}`);
+    return {};
+  }
+}
+
+function setLoginItemEnabled(enabled) {
+  if (!canManageLoginItem(process.platform, app.isPackaged)) return getLoginItemStatus();
+  app.setLoginItemSettings(createLoginItemSettings(enabled));
+  return getLoginItemStatus();
+}
+
 function applyLoginItemPreference() {
+  if (!canManageLoginItem(process.platform, app.isPackaged)) return;
   const catalog = readJsonFile(CATALOG_PATH, {});
-  app.setLoginItemSettings({
-    openAtLogin: Boolean(catalog.settings?.launchAppAtLogin),
-    openAsHidden: false
-  });
+  app.setLoginItemSettings(createLoginItemSettings(catalog.settings?.launchAppAtLogin));
 }
 
 async function applyAppStartupActionsOnce() {
@@ -1584,7 +1669,7 @@ async function loadConsole() {
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
   await mainWindow.loadURL(`${CONTROL_URL}#overview`);
   log("console loaded");
-  showMainWindow();
+  showMainWindowIfAllowed();
 }
 
 async function showOffline(message) {
@@ -1595,7 +1680,7 @@ async function showOffline(message) {
       reason: nativeErrorMessage(message || trayText("后台服务暂时不可用", "The control plane is temporarily unavailable")).slice(0, 240)
     }
   });
-  showMainWindow();
+  showMainWindowIfAllowed();
 }
 
 function scheduleReconnect(delay = 2000) {
@@ -1658,13 +1743,23 @@ async function waitForHealth(timeoutMs) {
 }
 
 function showMainWindow() {
+  const wasSilent = startupPresentation.isSilent();
+  startupPresentation.reveal();
+  if (process.platform === "darwin" && app.dock) void app.dock.show();
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
   const before = mainWindowState();
   bringWindowToFront(app, mainWindow, process.platform);
+  if (wasSilent && isOnline) void maybeOfferPortlessAccess();
   setTimeout(() => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     log(`main window requested: before=${JSON.stringify(before)} after=${JSON.stringify(mainWindowState())}`);
   }, 120);
+}
+
+function showMainWindowIfAllowed() {
+  if (!startupPresentation.shouldShowWindow()) return false;
+  showMainWindow();
+  return true;
 }
 
 function mainWindowState() {

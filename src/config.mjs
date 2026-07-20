@@ -12,6 +12,7 @@ export const PROCESS_COMPOSE_PATH = path.join(ROOT, "generated", "process-compos
 export const WORKER_COMPOSE_PATH = path.join(ROOT, "generated", "services.yaml");
 export const CADDYFILE_PATH = path.join(ROOT, "generated", "Caddyfile");
 export const RUNTIME_DIR = path.join(ROOT, "runtime");
+export const TUNNEL_STATE_DIR = path.join(RUNTIME_DIR, "tunnels");
 
 export const BINARIES = {
   processCompose: findBinary("process-compose"),
@@ -27,6 +28,11 @@ export const SSH_ASKPASS_PATH = process.env.LOCAL_OPS_SSH_ASKPASS
 
 export const PORTABLE_CONFIG_FORMAT = "local-ops-portable-config";
 export const PORTABLE_CONFIG_VERSION = 1;
+export const SSH_CONNECT_TIMEOUT_SECONDS = 5;
+export const SSH_CONNECTION_ATTEMPTS = 1;
+export const TUNNEL_RESTART_BACKOFF_SECONDS = 3;
+export const TUNNEL_STARTUP_RETRY_LIMIT = 40;
+export const TUNNEL_MANUAL_RETRY_LIMIT = 3;
 
 const PORTABLE_BOOLEAN_SETTING_KEYS = [
   "launchAppAtLogin",
@@ -167,12 +173,12 @@ export function portableConfigCounts(catalog) {
   };
 }
 
-export function renderAll(catalog = loadCatalog()) {
+export function renderAll(catalog = loadCatalog(), options = {}) {
   validateCatalog(catalog);
   fs.mkdirSync(path.dirname(PROCESS_COMPOSE_PATH), { recursive: true });
   fs.mkdirSync(RUNTIME_DIR, { recursive: true });
   atomicWrite(PROCESS_COMPOSE_PATH, renderProcessCompose(catalog), 0o600);
-  atomicWrite(WORKER_COMPOSE_PATH, renderWorkerCompose(catalog), 0o600);
+  atomicWrite(WORKER_COMPOSE_PATH, renderWorkerCompose(catalog, options), 0o600);
   atomicWrite(CADDYFILE_PATH, renderCaddyfile(catalog), 0o600);
   return { processCompose: PROCESS_COMPOSE_PATH, workerCompose: WORKER_COMPOSE_PATH, caddyfile: CADDYFILE_PATH };
 }
@@ -228,6 +234,7 @@ export function validateCatalog(catalog) {
     if (tunnel.identityFile && !path.isAbsolute(tunnel.identityFile)) {
       throw new Error("SSH 密钥路径必须是绝对路径");
     }
+    if (tunnel.healthUrl) assertLocalUrl(tunnel.healthUrl);
     assertSecretReference(tunnel.passphraseRef);
   }
 
@@ -321,7 +328,7 @@ export function normalizeTunnel(input) {
     bindAddress: "127.0.0.1",
     identityFile: normalizeHomePath(input.identityFile),
     passphraseRef: normalizeSecretReference(input.passphraseRef),
-    autoStart: Boolean(input.autoStart)
+    healthUrl: String(input.healthUrl || "").trim()
   };
   validateCatalog(validationCatalog({ tunnels: [tunnel] }));
   return tunnel;
@@ -398,18 +405,34 @@ export function publicProxyPort(catalog) {
   return Number(catalog.settings.publicProxyPort || catalog.settings.proxyPort);
 }
 
+export function tunnelNetworkStatePath(id) {
+  return path.join(TUNNEL_STATE_DIR, `${normalizeId(id)}.json`);
+}
+
+export function tunnelRetryLimit(value) {
+  const requested = Number(typeof value === "object" ? value?.retryLimit : value);
+  return requested === TUNNEL_STARTUP_RETRY_LIMIT
+    ? TUNNEL_STARTUP_RETRY_LIMIT
+    : TUNNEL_MANUAL_RETRY_LIMIT;
+}
+
 export function renderSshCommand(inputArgs, passphraseRef = "", background = false) {
   const args = [...inputArgs];
   const reference = normalizeSecretReference(passphraseRef);
+  insertSshOptions(args, [
+    ["ConnectTimeout", String(SSH_CONNECT_TIMEOUT_SECONDS)],
+    ["ConnectionAttempts", String(SSH_CONNECTION_ATTEMPTS)]
+  ]);
   if (background && !reference) {
-    args.splice(Math.max(0, args.length - 1), 0, "-o", "BatchMode=yes");
+    insertSshOptions(args, [["BatchMode", "yes"]]);
   }
   if (!reference) return `exec ${args.map(shellQuote).join(" ")}`;
 
-  args.splice(Math.max(0, args.length - 1), 0,
-    "-o", "PreferredAuthentications=publickey",
-    "-o", "PasswordAuthentication=no",
-    "-o", "KbdInteractiveAuthentication=no");
+  insertSshOptions(args, [
+    ["PreferredAuthentications", "publickey"],
+    ["PasswordAuthentication", "no"],
+    ["KbdInteractiveAuthentication", "no"]
+  ]);
   const environment = [
     "/usr/bin/env",
     `SSH_ASKPASS=${SSH_ASKPASS_PATH}`,
@@ -420,6 +443,16 @@ export function renderSshCommand(inputArgs, passphraseRef = "", background = fal
     `LOCAL_OPS_KEYCHAIN_ACCOUNT=${reference}`
   ];
   return `exec ${[...environment, ...args].map(shellQuote).join(" ")}`;
+}
+
+function insertSshOptions(args, options) {
+  const additions = [];
+  for (const [key, value] of options) {
+    const expression = `${key}=${value}`;
+    if (args.some((item) => String(item).toLowerCase() === expression.toLowerCase())) continue;
+    additions.push("-o", expression);
+  }
+  args.splice(Math.max(1, args.length - 1), 0, ...additions);
 }
 
 export function buildTerminalAppleScript(terminalApp, command) {
@@ -495,7 +528,7 @@ function renderProcessCompose(catalog) {
   return `${lines.join("\n")}\n`;
 }
 
-function renderWorkerCompose(catalog) {
+export function renderWorkerCompose(catalog, options = {}) {
   const lines = [
     'version: "0.5"',
     'is_tui_disabled: true',
@@ -527,6 +560,7 @@ function renderWorkerCompose(catalog) {
   }
 
   for (const tunnel of catalog.tunnels) {
+    const retryLimit = configuredTunnelRetryLimit(options, tunnel.id);
     const args = [
       BINARIES.ssh,
       "-N", "-T",
@@ -542,17 +576,40 @@ function renderWorkerCompose(catalog) {
       `${tunnel.bindAddress}:${tunnel.localPort}:${tunnel.remoteHost}:${tunnel.remotePort}`,
       `${tunnel.sshUser}@${tunnel.sshHost}`
     );
+    const stateFile = tunnelNetworkStatePath(tunnel.id);
+    const sshCommand = renderSshCommand(args, tunnel.passphraseRef, true);
     appendProcess(lines, tunnel.id, {
-      command: renderSshCommand(args, tunnel.passphraseRef, true),
+      command: managedTunnelCommand(tunnel, sshCommand, stateFile, retryLimit),
       workingDir: ROOT,
       namespace: "tunnels",
       description: tunnel.description || tunnel.name,
       restart: "always",
-      backoffSeconds: 10,
-      disabled: !tunnel.autoStart
+      backoffSeconds: TUNNEL_RESTART_BACKOFF_SECONDS,
+      maxRestarts: retryLimit,
+      disabled: true,
+      readinessExec: tunnel.healthUrl ? {
+        command: tunnelHealthProbeCommand(tunnel.healthUrl, stateFile, true),
+        initialDelaySeconds: 1,
+        periodSeconds: 2,
+        timeoutSeconds: 2,
+        failureThreshold: 1
+      } : null,
+      livenessExec: tunnel.healthUrl ? {
+        command: tunnelHealthProbeCommand(tunnel.healthUrl, stateFile),
+        initialDelaySeconds: 3,
+        periodSeconds: 3,
+        timeoutSeconds: 2,
+        failureThreshold: 2
+      } : null
     });
   }
   return `${lines.join("\n")}\n`;
+}
+
+function configuredTunnelRetryLimit(options, id) {
+  const limits = options?.tunnelRetryLimits;
+  const requested = limits instanceof Map ? limits.get(id) : limits?.[id];
+  return tunnelRetryLimit(requested);
 }
 
 function appendProcess(lines, id, definition) {
@@ -566,32 +623,50 @@ function appendProcess(lines, id, definition) {
   lines.push('    availability:');
   lines.push(`      restart: ${yamlString(definition.restart || "no")}`);
   lines.push(`      backoff_seconds: ${Number(definition.backoffSeconds || 2)}`);
+  if (Number.isInteger(definition.maxRestarts) && definition.maxRestarts > 0) {
+    lines.push(`      max_restarts: ${definition.maxRestarts}`);
+  }
   if (definition.dependsOn) {
     lines.push('    depends_on:');
     lines.push(`      ${definition.dependsOn}:`);
     lines.push('        condition: process_healthy');
   }
   if (definition.readiness) {
-    lines.push('    readiness_probe:');
-    lines.push('      http_get:');
-    lines.push(`        host: ${yamlString(definition.readiness.host)}`);
-    lines.push(`        port: ${Number(definition.readiness.port)}`);
-    lines.push(`        path: ${yamlString(definition.readiness.path || "/")}`);
-    lines.push(`        scheme: ${yamlString(definition.readiness.scheme || "http")}`);
-    lines.push('      initial_delay_seconds: 1');
-    lines.push('      period_seconds: 5');
-    lines.push('      timeout_seconds: 2');
-    lines.push('      failure_threshold: 3');
+    appendHttpProbe(lines, "readiness_probe", definition.readiness);
+  }
+  if (definition.liveness) {
+    appendHttpProbe(lines, "liveness_probe", definition.liveness);
   }
   if (definition.readinessExec) {
-    lines.push('    readiness_probe:');
-    lines.push('      exec:');
-    lines.push(`        command: ${yamlString(definition.readinessExec)}`);
-    lines.push('      initial_delay_seconds: 1');
-    lines.push('      period_seconds: 5');
-    lines.push('      timeout_seconds: 2');
-    lines.push('      failure_threshold: 3');
+    appendExecProbe(lines, "readiness_probe", definition.readinessExec);
   }
+  if (definition.livenessExec) {
+    appendExecProbe(lines, "liveness_probe", definition.livenessExec);
+  }
+}
+
+function appendHttpProbe(lines, name, probe) {
+  lines.push(`    ${name}:`);
+  lines.push('      http_get:');
+  lines.push(`        host: ${yamlString(probe.host)}`);
+  lines.push(`        port: ${Number(probe.port)}`);
+  lines.push(`        path: ${yamlString(probe.path || "/")}`);
+  lines.push(`        scheme: ${yamlString(probe.scheme || "http")}`);
+  lines.push(`      initial_delay_seconds: ${Number(probe.initialDelaySeconds ?? 1)}`);
+  lines.push(`      period_seconds: ${Number(probe.periodSeconds ?? 5)}`);
+  lines.push(`      timeout_seconds: ${Number(probe.timeoutSeconds ?? 2)}`);
+  lines.push(`      failure_threshold: ${Number(probe.failureThreshold ?? 3)}`);
+}
+
+function appendExecProbe(lines, name, definition) {
+  const probe = typeof definition === "string" ? { command: definition } : definition;
+  lines.push(`    ${name}:`);
+  lines.push('      exec:');
+  lines.push(`        command: ${yamlString(probe.command)}`);
+  lines.push(`      initial_delay_seconds: ${Number(probe.initialDelaySeconds ?? 1)}`);
+  lines.push(`      period_seconds: ${Number(probe.periodSeconds ?? 5)}`);
+  lines.push(`      timeout_seconds: ${Number(probe.timeoutSeconds ?? 2)}`);
+  lines.push(`      failure_threshold: ${Number(probe.failureThreshold ?? 3)}`);
 }
 
 function renderCaddyfile(catalog) {
@@ -628,6 +703,36 @@ function parseHealthUrl(value) {
     path: `${url.pathname}${url.search}`,
     scheme: url.protocol.replace(":", "")
   };
+}
+
+function tunnelHealthProbeCommand(value, waitingStateFile = "", includeConnectingGrace = false) {
+  const args = [
+    shellQuote(BINARIES.node),
+    shellQuote(path.join(ROOT, "scripts", "tunnel-http-health.mjs")),
+    shellQuote(value)
+  ];
+  if (waitingStateFile) {
+    args.push("--allow-waiting-network", shellQuote(waitingStateFile));
+  }
+  if (includeConnectingGrace) args.push("--connecting-grace-ms", "7000");
+  return args.join(" ");
+}
+
+function managedTunnelCommand(tunnel, sshCommand, stateFile, retryLimit) {
+  return [
+    "exec",
+    shellQuote(BINARIES.node),
+    shellQuote(path.join(ROOT, "scripts", "run-managed-tunnel.mjs")),
+    "--id", shellQuote(tunnel.id),
+    "--state", shellQuote(stateFile),
+    "--host", shellQuote(tunnel.sshHost),
+    "--port", shellQuote(String(tunnel.sshPort || 22)),
+    "--retry-limit", shellQuote(String(retryLimit)),
+    "--destination", shellQuote(`${tunnel.sshUser}@${tunnel.sshHost}`),
+    "--ssh-binary", shellQuote(BINARIES.ssh),
+    "--working-dir", shellQuote(ROOT),
+    "--command", shellQuote(sshCommand)
+  ].join(" ");
 }
 
 function atomicWrite(file, content, mode) {

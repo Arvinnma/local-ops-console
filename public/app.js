@@ -1,5 +1,10 @@
-import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.8.0";
-import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.8.0";
+import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.8.2";
+import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.8.2";
+import {
+  tunnelDisplayState,
+  tunnelFailureMessage,
+  tunnelPrimaryAction
+} from "./tunnel-ui.js?v=1.8.2";
 
 const LANGUAGE_STORAGE_KEY = "local-ops-language";
 setLocale(normalizeLocale(localStorage.getItem(LANGUAGE_STORAGE_KEY)));
@@ -22,6 +27,7 @@ const ui = {
   iconField: null,
   orderWrites: new Map(),
   orderVersions: new Map(),
+  tunnelBusy: new Set(),
   polling: null,
   busy: false,
   portless: {
@@ -295,9 +301,9 @@ function renderState() {
 function attentionItems() {
   if (!ui.state) return [];
   const processItems = ui.state.processes
-    .filter((item) => item.status !== "running" || item.health === "unhealthy")
+    .filter((item) => !isProcessHealthy(item))
     .map((item) => {
-      const stopped = item.status !== "running";
+      const stopped = !isProcessActive(item);
       const unhealthy = item.health === "unhealthy";
       return {
         id: item.id,
@@ -306,7 +312,13 @@ function attentionItems() {
         fallbackIcon: item.kind === "tunnel" ? "ssh" : "server",
         view: item.kind === "tunnel" ? "tunnels" : "services",
         status: stopped ? item.status : "unhealthy",
-        reason: stopped && unhealthy
+        reason: item.kind === "tunnel" && item.status === "waiting_network"
+          ? item.networkCheck?.error || tr("等待 SSH 主机网络恢复")
+          : item.kind === "tunnel" && item.domainEntry?.configured && !item.domainEntry?.ready && item.status === "connected"
+            ? item.domainEntry?.lastError || tr("域名入口尚未就绪")
+          : item.kind === "tunnel" && item.lastConnectionError
+            ? item.lastConnectionError
+          : stopped && unhealthy
           ? `${statusLabel(item.status)} · ${tr("健康检查异常")}`
           : stopped
             ? tr("托管进程已停止")
@@ -388,7 +400,7 @@ function bulkStartCandidates(scope) {
       ? ui.bootstrap.config.tunnels
       : [...ui.bootstrap.config.services, ...ui.bootstrap.config.tunnels];
   const processMap = new Map(ui.state.processes.map((item) => [item.id, item]));
-  return configured.map((item) => processMap.get(item.id)).filter((item) => item && item.status !== "running");
+  return configured.map((item) => processMap.get(item.id)).filter((item) => item && !isProcessActive(item));
 }
 
 function bulkCandidateCounts(items) {
@@ -524,10 +536,12 @@ function renderTunnelCards() {
   const processMap = new Map(ui.state.processes.map((item) => [item.id, item]));
   container.innerHTML = tunnels.length ? tunnels.map((tunnel) => {
     const process = processMap.get(tunnel.id) || { id: tunnel.id, name: tunnel.name, status: "unknown", protected: false };
+    const displayState = tunnelDisplayState(process, ui.tunnelBusy.has(tunnel.id));
+    const failureMessage = tunnelFailureMessage(process, displayState);
     return `<article class="tunnel-card" ${sortItemAttributes("tunnel", tunnel.id)}>
       <div class="tunnel-card-head">
         <div class="tunnel-title-row">${resourceIcon(tunnel.icon, "ssh")}<div><h3>${escapeHtml(tunnel.name)}</h3><p>${escapeHtml(tunnel.description || tunnel.id)}</p></div></div>
-        <span class="status-pill ${escapeHtml(process.status)}">${statusLabel(process.status)}</span>
+        <span class="status-pill ${escapeHtml(displayState)}">${statusLabel(displayState)}</span>
       </div>
       <p class="tunnel-via"><span>经由</span><strong>${escapeHtml(tunnel.sshUser)}@${escapeHtml(tunnel.sshHost)}${Number(tunnel.sshPort || 22) === 22 ? "" : `:${tunnel.sshPort}`}</strong></p>
       <div class="tunnel-flow">
@@ -535,9 +549,66 @@ function renderTunnelCards() {
         <span class="tunnel-arrow" aria-hidden="true">→</span>
         <div class="tunnel-endpoint"><small>转发目标</small><strong>${escapeHtml(tunnel.remoteHost)}:${tunnel.remotePort}</strong></div>
       </div>
-      <div class="tunnel-card-foot"><span class="muted-label">${tunnel.autoStart ? "自动连接" : "手动连接"}</span>${processControls(process, { editAction: "edit-tunnel", deleteAction: "delete-tunnel" })}${sortHandle("tunnel", tunnel.id)}</div>
+      ${tunnelRuntimeDetails(process, displayState)}
+      <div class="tunnel-card-foot">
+        ${failureMessage ? `<div class="tunnel-error-line" data-tunnel-error title="${escapeAttribute(tr(failureMessage))}"><span>${escapeHtml(tr(failureMessage))}</span></div>` : ""}
+        ${tunnelControls(process, displayState, { editAction: "edit-tunnel", deleteAction: "delete-tunnel" })}${sortHandle("tunnel", tunnel.id)}
+      </div>
     </article>`;
   }).join("") : '<p class="empty-card">还没有添加 SSH 隧道。点击右上角开始添加。</p>';
+  window.requestAnimationFrame(updateTunnelErrorMarquees);
+}
+
+function tunnelRuntimeDetails(process, displayState) {
+  const health = process.healthCheck || {};
+  const network = process.networkCheck || {};
+  const entry = process.domainEntry || {};
+  const healthResult = health.ok
+    ? health.mode === "http"
+      ? `HTTP ${health.statusCode}${health.latencyMs == null ? "" : ` · ${health.latencyMs} ms`}`
+      : `${tr("TCP 已连通")}${health.latencyMs == null ? "" : ` · ${health.latencyMs} ms`}`
+    : statusLabel(displayState);
+  const sshStatus = health.ok
+    ? tr("已连接")
+    : displayState === "stopped"
+      ? tr("已停止")
+      : displayState === "connection_failed"
+        ? tr("连接失败")
+        : tr("连接中");
+  const entryStatus = !entry.configured
+    ? tr("未配置")
+    : entry.ready
+      ? tr("已就绪")
+      : tr("未就绪");
+  const entryClass = entry.ready ? "runtime-ready" : entry.configured ? "runtime-not-ready" : "runtime-neutral";
+  const networkResult = process.status === "waiting_network"
+    ? tr("等待网络")
+    : network.ok
+      ? `${tr("可连接")}${network.latencyMs == null ? "" : ` · ${network.latencyMs} ms`}`
+      : tr("尚未验证");
+  return `<div class="tunnel-runtime">
+    <div class="tunnel-layer-state"><small>${tr("SSH 隧道")}</small><strong class="${health.ok ? "runtime-ready" : displayState === "connecting" ? "runtime-pending" : "runtime-not-ready"}" title="${escapeAttribute(health.target || "")}">${escapeHtml(sshStatus)}</strong></div>
+    <div class="tunnel-layer-state"><small>${tr("域名入口")}</small><strong class="${entryClass}" title="${escapeAttribute(entry.target || entry.lastError || "")}">${escapeHtml(entryStatus)}</strong></div>
+    <div><small>${tr("SSH 主机网络")}</small><strong title="${escapeAttribute(network.target || "")}">${escapeHtml(networkResult)}</strong></div>
+    <div><small>${tr("隧道健康检查")}</small><strong title="${escapeAttribute(health.target || "")}">${escapeHtml(healthResult)}</strong></div>
+  </div>`;
+}
+
+function updateTunnelErrorMarquees() {
+  document.querySelectorAll("[data-tunnel-error]").forEach((element) => {
+    const content = element.querySelector("span");
+    if (!content) return;
+    const distance = Math.ceil(content.scrollWidth - element.clientWidth);
+    const overflowing = distance > 4;
+    element.classList.toggle("is-overflowing", overflowing);
+    if (overflowing) {
+      element.style.setProperty("--tunnel-error-distance", `${distance}px`);
+      element.style.setProperty("--tunnel-error-duration", `${Math.max(6, Math.min(18, distance / 28 + 5))}s`);
+    } else {
+      element.style.removeProperty("--tunnel-error-distance");
+      element.style.removeProperty("--tunnel-error-duration");
+    }
+  });
 }
 
 function renderRoutesTable() {
@@ -554,7 +625,7 @@ function renderRoutesTable() {
       <td><div class="table-name">${resourceIcon(route.icon, route.system ? "localops" : "link")}<span><strong>${escapeHtml(route.name)}</strong><small>${escapeHtml(route.id)}</small></span></div></td>
       <td><a class="table-link mono" href="${escapeAttribute(route.url)}" target="_blank" rel="noreferrer">${escapeHtml(route.url)}</a></td>
       <td class="mono">${escapeHtml(route.target)}</td>
-      <td><span class="status-pill ${route.enabled ? "online" : "disabled"}">${route.enabled ? "已启用" : "已禁用"}</span></td>
+      <td><span class="status-pill ${route.entryReady === true ? "online" : route.entryReady === false ? "offline" : route.enabled ? "online" : "disabled"}">${route.entryReady === true ? tr("已就绪") : route.entryReady === false ? tr("未就绪") : route.enabled ? tr("已启用") : tr("已禁用")}</span></td>
       <td class="action-cell">${routeControls(route, editable)}</td>
       <td class="sort-cell">${sortHandle("route", route.id, !editable)}</td>
     </tr>`;
@@ -918,18 +989,34 @@ function updateSettingsMetrics() {
 
 function processControls(item, resourceActions = {}, extraClass = "") {
   const resourceName = item.name || item.id;
+  const active = isProcessActive(item);
   const menuItems = [];
   if (resourceActions.editAction) menuItems.push(menuAction(resourceActions.editAction, item.id, tr("编辑"), resourceName));
-  if (!item.protected && item.status === "running") menuItems.push(menuAction("restart", item.id, tr("重启"), resourceName));
+  if (!item.protected && active) menuItems.push(menuAction("restart", item.id, tr("重启"), resourceName));
   menuItems.push(menuAction("logs", item.id, tr("查看日志"), resourceName));
   if (resourceActions.deleteAction) menuItems.push(menuAction(resourceActions.deleteAction, item.id, tr("删除"), resourceName));
 
   const primary = item.protected
     ? ""
-    : item.status === "running"
+    : active
       ? actionButton("stop", item.id, tr("关闭"), resourceName)
       : actionButton("start", item.id, tr("开启"), resourceName);
   return actionControls(primary, menuItems, resourceName, extraClass);
+}
+
+function tunnelControls(item, displayState, resourceActions = {}) {
+  const resourceName = item.name || item.id;
+  const menuItems = [];
+  if (resourceActions.editAction) menuItems.push(menuAction(resourceActions.editAction, item.id, tr("编辑"), resourceName));
+  if (displayState === "connected") menuItems.push(menuAction("restart", item.id, tr("重启"), resourceName));
+  menuItems.push(menuAction("logs", item.id, tr("查看日志"), resourceName));
+  if (resourceActions.deleteAction) menuItems.push(menuAction(resourceActions.deleteAction, item.id, tr("删除"), resourceName));
+
+  const primaryAction = tunnelPrimaryAction(displayState);
+  const primary = primaryAction.disabled
+    ? disabledActionButton(primaryAction.style, tr(primaryAction.label), resourceName)
+    : actionButton(primaryAction.action, item.id, tr(primaryAction.label), resourceName, { style: primaryAction.style });
+  return actionControls(primary, menuItems, resourceName);
 }
 
 function routeControls(route, editable) {
@@ -995,6 +1082,7 @@ function actionIcon(name) {
     start: '<path d="m8 5 11 7-11 7V5Z"/>',
     run: '<path d="M5 4h14v16H5V4Zm2 2v12h10V6H7Zm2 3 3 3-3 3-1.4-1.4L9.2 12 7.6 10.4 9 9Zm4 5h3v2h-3v-2Z"/>',
     restart: '<path d="M18.6 6.4A9 9 0 1 0 21 12h-2a7 7 0 1 1-2.1-5l-2.4 2.5H21V3l-2.4 3.4Z"/>',
+    pending: '<path d="M18.6 6.4A9 9 0 1 0 21 12h-2a7 7 0 1 1-2.1-5l-2.4 2.5H21V3l-2.4 3.4Z"/>',
     stop: '<path d="M7 7h10v10H7V7Z"/>',
     edit: '<path d="m15.8 4.2 4 4L9 19H5v-4L15.8 4.2Zm0 2.8L7 15.8V17h1.2L17 8.2 15.8 7Z"/>',
     delete: '<path d="M8 4h8l1 2h4v2H3V6h4l1-2Zm-2 6h12l-1 10H7L6 10Zm3 2v6h2v-6H9Zm4 0v6h2v-6h-2Z"/>',
@@ -1058,7 +1146,12 @@ async function handleAction(action, id, element) {
   if (action.startsWith("edit-")) return openEditDialog(action.slice(5), id);
   if (action.startsWith("delete-")) return deleteResource(action, id);
   if (action === "run-terminal") return runTerminalTask(id);
+  if (action === "retry-tunnel") return retryTunnel(id);
   if (action.startsWith("docker-")) return controlDocker(id, action.slice(7));
+  const process = ui.state?.processes?.find((item) => item.id === id);
+  if (process?.kind === "tunnel" && (action === "start" || action === "restart")) {
+    return runTunnelConnectionAction(id, action);
+  }
   try {
     ui.busy = true;
     updateBulkStartButton();
@@ -1072,6 +1165,42 @@ async function handleAction(action, id, element) {
   } finally {
     ui.busy = false;
     updateBulkStartButton();
+  }
+}
+
+async function runTunnelConnectionAction(id, action) {
+  if (ui.tunnelBusy.has(id)) return;
+  ui.tunnelBusy.add(id);
+  renderTunnelCards();
+  localizeDocument(document.querySelector("#tunnel-cards"));
+  try {
+    await request(`/api/processes/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+    await wait(450);
+    await refresh(true);
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    ui.tunnelBusy.delete(id);
+    await refresh(true);
+  }
+}
+
+async function retryTunnel(id) {
+  const process = ui.state?.processes?.find((item) => item.id === id);
+  if (!process || ui.tunnelBusy.has(id)) return;
+  ui.tunnelBusy.add(id);
+  renderTunnelCards();
+  localizeDocument(document.querySelector("#tunnel-cards"));
+  try {
+    const action = isProcessActive(process) ? "restart" : "start";
+    await request(`/api/processes/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+    await wait(450);
+    await refresh(true);
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    ui.tunnelBusy.delete(id);
+    await refresh(true);
   }
 }
 
@@ -1146,7 +1275,6 @@ function openAddDialog(kind = "service") {
   configurePassphraseField("tunnel", false);
   configurePassphraseField("terminal", false);
   form.elements.namedItem("service-autostart").checked = true;
-  form.elements.namedItem("tunnel-autostart").checked = true;
   form.elements.namedItem("route-enabled").checked = true;
   document.querySelector(".service-route-fields").hidden = false;
   selectFormTab(kind);
@@ -1206,8 +1334,8 @@ function populateResourceForm(kind, item) {
     setFormValue("tunnel-remote-host", item.remoteHost);
     setFormValue("tunnel-remote-port", item.remotePort);
     setFormValue("tunnel-key", item.identityFile);
+    setFormValue("tunnel-health", item.healthUrl || "");
     configurePassphraseField("tunnel", item.hasKeyPassphrase);
-    form.elements.namedItem("tunnel-autostart").checked = item.autoStart;
   } else if (kind === "route") {
     setFormValue("route-name", item.name);
     setResourceIcon("route-icon", item.icon || "link");
@@ -1309,9 +1437,9 @@ async function saveResource(event) {
         remoteHost: data.get("tunnel-remote-host"),
         remotePort: data.get("tunnel-remote-port"),
         identityFile: data.get("tunnel-key"),
+        healthUrl: data.get("tunnel-health"),
         identityPassphrase: data.get("tunnel-key-passphrase"),
-        removeIdentityPassphrase: data.get("tunnel-clear-passphrase") === "on",
-        autoStart: data.get("tunnel-autostart") === "on"
+        removeIdentityPassphrase: data.get("tunnel-clear-passphrase") === "on"
       };
     } else if (ui.activeForm === "route") {
       endpoint = editing ? `/api/routes/${encodeURIComponent(editing.id)}` : "/api/routes";
@@ -1631,7 +1759,34 @@ function kindSymbol(kind) {
 }
 
 function statusLabel(status) {
-  return tr(({ running: "运行中", stopped: "已停止", disabled: "未启用", unhealthy: "健康检查异常", offline: "离线", online: "在线", unknown: "未知" })[status] || status);
+  return tr(({
+    running: "运行中",
+    connected: "已连接",
+    connection_failed: "连接失败",
+    waiting_network: "等待网络",
+    connecting: "连接中",
+    retrying: "重试中",
+    restarting: "重启中",
+    stopped: "已停止",
+    disabled: "未启用",
+    unhealthy: "健康检查异常",
+    offline: "离线",
+    online: "在线",
+    unknown: "未知"
+  })[status] || status);
+}
+
+function isProcessActive(item) {
+  return Boolean(item?.active ?? item?.status === "running");
+}
+
+function isProcessHealthy(item) {
+  if (item.kind === "tunnel") {
+    return item.status === "connected"
+      && item.healthCheck?.ok
+      && (!item.domainEntry?.configured || item.fullyAvailable);
+  }
+  return item.status === "running" && item.health !== "unhealthy";
 }
 
 function actionLabel(action) {

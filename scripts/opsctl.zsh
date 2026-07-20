@@ -17,6 +17,41 @@ WORKER=($PROCESS_COMPOSE --address 127.0.0.1 --port 19093 --token-file "$ROOT/co
 LABEL="gui/$(id -u)/com.arvin.localops"
 PLIST="$ROOT/launchd/com.arvin.localops.plist"
 
+control_process() {
+  local action="$1"
+  local process_id="$2"
+  case "$action" in
+    start|stop|restart) ;;
+    *) command printf '不支持的进程操作：%s\n' "$action" >&2; return 2 ;;
+  esac
+
+  local console_port bootstrap token response_file http_code error_message
+  console_port="$(/usr/bin/plutil -extract settings.consolePort raw -o - "$ROOT/config/catalog.json" 2>/dev/null || command printf '19090')"
+  bootstrap="$(/usr/bin/curl --silent --show-error --fail --max-time 5 "http://127.0.0.1:${console_port}/api/bootstrap")" || {
+    command printf '%s\n' 'Local Ops 控制面未就绪，无法执行进程操作' >&2
+    return 1
+  }
+  token="$(command printf '%s' "$bootstrap" | /usr/bin/plutil -extract csrfToken raw -o - -- - 2>/dev/null)"
+  [[ -n "$token" ]] || { command printf '%s\n' '无法读取 Local Ops 控制令牌' >&2; return 1; }
+
+  response_file="$(/usr/bin/mktemp -t local-ops-cli)"
+  http_code="$(/usr/bin/curl --silent --show-error --output "$response_file" --write-out '%{http_code}' --max-time 30 \
+    --request POST \
+    --header "X-Local-Ops-Token: $token" \
+    "http://127.0.0.1:${console_port}/api/processes/${process_id}/${action}")" || {
+      command rm -f "$response_file"
+      return 1
+    }
+  if [[ "$http_code" != 2* ]]; then
+    error_message="$(/usr/bin/plutil -extract error raw -o - "$response_file" 2>/dev/null || command printf 'HTTP %s' "$http_code")"
+    command rm -f "$response_file"
+    command printf '%s\n' "$error_message" >&2
+    return 1
+  fi
+  command rm -f "$response_file"
+  command printf '%s：%s\n' "$process_id" "$action"
+}
+
 case "${1:-help}" in
   status)
     command printf '%s\n' '控制面：'
@@ -59,7 +94,7 @@ case "${1:-help}" in
     "${CORE[@]}" attach
     ;;
   process)
-    "${WORKER[@]}" process "${2:?缺少操作 start/stop/restart}" "${3:?缺少进程 ID}"
+    control_process "${2:?缺少操作 start/stop/restart}" "${3:?缺少进程 ID}"
     ;;
   open)
     PUBLIC_PORT="$(/usr/bin/plutil -extract settings.publicProxyPort raw -o - "$ROOT/config/catalog.json" 2>/dev/null || /usr/bin/plutil -extract settings.proxyPort raw -o - "$ROOT/config/catalog.json" 2>/dev/null || command printf '19080')"

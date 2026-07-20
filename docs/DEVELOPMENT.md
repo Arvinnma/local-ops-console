@@ -2,7 +2,7 @@
 
 ## Supported build target
 
-Local Ops v1.8.0 ships an Apple Silicon (`arm64`) macOS package. Intel (`x64`) and universal packages are not part of the current release matrix.
+Local Ops v1.8.2 ships an Apple Silicon (`arm64`) macOS package. Intel (`x64`) and universal packages are not part of the current release matrix.
 
 ## Prerequisites
 
@@ -120,7 +120,7 @@ Output:
 
 ```text
 desktop/dist/mac-arm64/Local Ops.app
-desktop/dist/Local-Ops-1.8.0-arm64.dmg
+desktop/dist/Local-Ops-1.8.2-arm64.dmg
 ```
 
 To build, replace the app in Applications, re-sign ad hoc, verify the signature, and launch it:
@@ -143,10 +143,9 @@ To build, replace the app in Applications, re-sign ad hoc, verify the signature,
    - mounted DMG layout/signature and installed-app launch;
    - upgrade preserves an existing user catalog.
 6. Re-run browser and menu-bar QA from the packaged app in Chinese and English.
-7. Generate the SHA-256 checksum and add it to `docs/releases/v1.8.0.md`.
-8. Commit and push while the repository is still private; verify CI.
-9. Make the repository public only after the secret audit and CI pass.
-10. Create signed Git tag `v1.8.0` when possible and publish the GitHub Release with the arm64 DMG and checksum.
+7. Generate the SHA-256 checksum and add it to the current file under `docs/releases/`.
+8. Commit and push only after the secret audit passes; verify CI.
+9. Create signed Git tag for the current version when possible and publish the GitHub Release with the arm64 DMG and checksum.
 
 Public distribution should eventually replace ad-hoc signing with Apple Developer ID signing, Hardened Runtime, entitlements, and notarization.
 

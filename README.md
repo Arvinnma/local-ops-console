@@ -27,14 +27,14 @@ Local Ops combines an Electron desktop app, a browser console, Process Compose, 
 - Docker Desktop is optional and is required only for Docker controls
 - Terminal.app is built in; iTerm2 is optional
 
-Intel (`x64`) packages are not provided in v1.8.1.
+Intel (`x64`) packages are not provided in v1.8.2.
 
 ## What it manages
 
 | Area | Capabilities |
 | --- | --- |
 | Services | Add Node or command services; start, stop, restart, edit, reorder, health-check, and inspect logs |
-| SSH tunnels | Manage loopback-only local forwards with keepalives and automatic reconnection |
+| SSH tunnels | Manage loopback-only forwards with a boot-time network gate, five-second fast failure, bounded three-second retries, and two-layer health checks |
 | SSH secrets | Verify encrypted private-key passphrases and store them only in macOS Keychain |
 | Existing services | Monitor endpoints already owned by another app without taking over their processes |
 | Reverse proxy | Open local services at names such as `http://api.localhost` or `panel.localhost/admin` |
@@ -47,7 +47,7 @@ Intel (`x64`) packages are not provided in v1.8.1.
 
 ## Install
 
-1. Download `Local-Ops-1.8.1-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
+1. Download `Local-Ops-1.8.2-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch **Local Ops** from Applications.
 
@@ -67,12 +67,16 @@ By default, Caddy listens at `127.0.0.1:19080`. Settings can install a loopback-
 
 1. Open **Services → Add Resource** and add a working directory plus start command.
 2. Optionally assign a local domain and service port.
-3. Add SSH local forwards under **SSH Tunnels**. If a private key is encrypted, save its passphrase to Keychain from the form.
+3. Add SSH local forwards under **SSH Tunnels** and configure a local HTTP health-check URL. If a private key is encrypted, save its passphrase to Keychain from the form.
 4. Use **Reverse Proxy** for services that already run elsewhere.
 5. Open the Local Ops menu-bar icon for quick first-level controls.
 6. Enable **Restore the Previous Session When the App Opens** only if desired; it is off by default.
 
 The **Needs Attention** card opens a detailed list of every stopped, unhealthy, or offline resource and links to its management page.
+
+Before connecting, Local Ops reads the effective SSH configuration—including the real `HostName/Port` behind an alias—and probes that endpoint. If the boot-time network is unavailable, the card remains **Connecting** while its **SSH Host Network** detail explains that it is waiting for network. It starts on the next three-second retry after the endpoint becomes reachable, without a fixed startup delay. Tunnels no longer start merely because the service scheduler starts: connections triggered from the web UI, menu bar, or bulk controls retry up to 3 times, while tunnels restored by **Restore the Previous Session When the App Opens** retry up to 40 times. Only an exhausted retry budget becomes **Connection Failed**; the yellow action begins a new three-retry manual cycle.
+
+A tunnel is marked **Connected** only after its local HTTP path check receives a valid response. When an existing reverse-proxy target maps to that tunnel, Local Ops also checks the complete `.localhost` URL, including its configured path. The UI reports **SSH Tunnel: Connected** and **Domain Entry: Ready / Not Ready** separately, and the card reports **Connected** only when both configured layers pass. The complete entry is derived from the reverse-proxy configuration and is not duplicated in the SSH tunnel form.
 
 See the [complete user guide](docs/USER_GUIDE.md) for field-by-field examples, Keychain behavior, startup semantics, backup scope, CLI commands, updates, uninstall steps, and troubleshooting.
 
@@ -145,13 +149,13 @@ npm ci
 npm run dmg
 ```
 
-The distributable is written to `desktop/dist/Local-Ops-1.8.1-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
+The distributable is written to `desktop/dist/Local-Ops-1.8.2-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
 
 Read [Development and Release Guide](docs/DEVELOPMENT.md) before changing packaging, native helpers, loopback bindings, or Electron security settings.
 
 ## Verification
 
-The v1.8.1 release gate covers syntax and unit tests, bilingual static-copy coverage, configuration round trips, API security checks, service lifecycle and logs, Caddy path routing, Docker container lifecycle, encrypted-key Keychain integration, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, mounted-DMG layout/signature checks, and an installed-app launch smoke test.
+The v1.8.2 release gate covers syntax and unit tests, bilingual static-copy coverage, configuration round trips, API security checks, service lifecycle and logs, SSH network gating with bounded retries, complete domain-entry checks, Caddy path routing, Docker state reads, encrypted-key Keychain integration, silent login-item startup, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, mounted-DMG layout/signature checks, and an installed-app launch smoke test.
 
 ## Contributing
 

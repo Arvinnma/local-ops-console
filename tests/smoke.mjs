@@ -251,8 +251,7 @@ try {
       localPort: tunnelLocalPort,
       remoteHost: "127.0.0.1",
       remotePort: 49192,
-      identityFile: "",
-      autoStart: false
+      identityFile: ""
     }
   });
   created.add("tunnel");
