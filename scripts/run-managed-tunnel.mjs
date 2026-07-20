@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 
 import {
   NETWORK_RETRY_INTERVAL_MS,
@@ -60,7 +61,8 @@ async function waitForNetworkAndRun() {
 
 function runSshCommand(endpoint, networkCheck) {
   if (stopping) return;
-  child = spawn("/bin/zsh", ["-c", options.command], {
+  const shell = fs.existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/sh";
+  child = spawn(shell, ["-c", options.command], {
     cwd: options.workingDir,
     env: process.env,
     stdio: "inherit"
