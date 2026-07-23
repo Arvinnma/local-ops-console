@@ -168,14 +168,54 @@ test("a management entry is fully available only when tunnel and domain checks b
   assert.equal(result.fullyAvailable, true);
 });
 
+test("slow authentication-protected domain entries accept 401 and 403 responses", async (t) => {
+  const tunnelServer = http.createServer((_request, response) => {
+    response.writeHead(200);
+    response.end("tunnel ready");
+  });
+  const statusCodes = [401, 403];
+  const entryServers = statusCodes.map((statusCode) => (
+    http.createServer((_request, response) => {
+      setTimeout(() => {
+        response.writeHead(statusCode);
+        response.end("authentication required");
+      }, 2200);
+    })
+  ));
+  await Promise.all([listen(tunnelServer), ...entryServers.map(listen)]);
+  t.after(() => Promise.all([close(tunnelServer), ...entryServers.map(close)]));
+
+  const definition = tunnelDefinition("slow-protected-entry", tunnelServer.address().port);
+  const result = await enrichTunnelProcess(definition, runningProcess(), {
+    now: Date.now(),
+    entryRoutes: entryServers.map((server, index) => ({
+      id: `protected-route-${statusCodes[index]}`,
+      name: "Protected service",
+      enabled: true,
+      url: `http://127.0.0.1:${server.address().port}/`
+    }))
+  });
+  assert.equal(result.status, "connected");
+  assert.equal(result.domainEntry.ready, true);
+  assert.deepEqual(
+    result.domainEntry.checks.map((check) => check.statusCode),
+    statusCodes
+  );
+  assert.ok(result.domainEntry.checks.every((check) => check.latencyMs >= 2000));
+  assert.equal(result.fullyAvailable, true);
+});
+
 test("a failed full-domain check stays connecting until the manual retry budget is exhausted", async (t) => {
+  let entryReady = false;
+  let entryProbeCount = 0;
   const tunnelServer = http.createServer((_request, response) => {
     response.writeHead(200);
     response.end("tunnel ready");
   });
   const entryServer = http.createServer((_request, response) => {
-    response.writeHead(404);
-    response.end("wrong entry path");
+    entryProbeCount += 1;
+    response.writeHead(entryReady ? 200 : 404);
+    response.end(entryReady ? "ready" : "wrong entry path");
   });
   await Promise.all([listen(tunnelServer), listen(entryServer)]);
   t.after(() => Promise.all([close(tunnelServer), close(entryServer)]));
@@ -198,6 +238,19 @@ test("a failed full-domain check stays connecting until the manual retry budget 
   assert.equal(result.domainEntry.retryLimit, 3);
   assert.equal(result.fullyAvailable, false);
   assert.equal(result.health, "degraded");
+  assert.equal(entryProbeCount, 1);
+
+  result = await enrichTunnelProcess(definition, runningProcess(), {
+    now: startedAt + 1000,
+    entryRoutes: [{
+      id: "bad-panel-entry",
+      name: "Panel",
+      enabled: true,
+      url: `http://127.0.0.1:${entryServer.address().port}/wrong-path`
+    }]
+  });
+  assert.equal(result.status, "retrying");
+  assert.equal(entryProbeCount, 1);
 
   for (let retry = 1; retry <= 3; retry += 1) {
     result = await enrichTunnelProcess(definition, runningProcess(), {
@@ -213,6 +266,40 @@ test("a failed full-domain check stays connecting until the manual retry budget 
   assert.equal(result.status, "connection_failed");
   assert.equal(result.domainEntry.terminal, true);
   assert.equal(result.domainEntry.retryCount, 3);
+  assert.equal(entryProbeCount, 4);
+  assert.equal(
+    result.nextRetryAt,
+    new Date(startedAt + 39_000).toISOString()
+  );
+
+  entryReady = true;
+  for (const elapsed of [10_000, 20_000, 38_000]) {
+    result = await enrichTunnelProcess(definition, runningProcess(), {
+      now: startedAt + elapsed,
+      entryRoutes: [{
+        id: "bad-panel-entry",
+        name: "Panel",
+        enabled: true,
+        url: `http://127.0.0.1:${entryServer.address().port}/wrong-path`
+      }]
+    });
+    assert.equal(result.status, "connection_failed");
+    assert.equal(entryProbeCount, 4);
+  }
+
+  result = await enrichTunnelProcess(definition, runningProcess(), {
+    now: startedAt + 39_000,
+    entryRoutes: [{
+      id: "bad-panel-entry",
+      name: "Panel",
+      enabled: true,
+      url: `http://127.0.0.1:${entryServer.address().port}/wrong-path`
+    }]
+  });
+  assert.equal(result.status, "connected");
+  assert.equal(result.domainEntry.ready, true);
+  assert.equal(result.domainEntry.terminal, undefined);
+  assert.equal(entryProbeCount, 5);
 });
 
 test("startup-restored domain-entry checks use a 40-retry budget", async (t) => {

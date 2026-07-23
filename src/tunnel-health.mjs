@@ -8,10 +8,11 @@ import {
 import { readTunnelNetworkState } from "./tunnel-network.mjs";
 
 const CONNECTING_WINDOW_MS = 5000;
-const HTTP_PROBE_TIMEOUT_MS = 2000;
+const HTTP_PROBE_TIMEOUT_MS = 10000;
 const TCP_PROBE_TIMEOUT_MS = 1500;
 const ACTIVE_NETWORK_WAIT_MAX_AGE_MS = 12000;
 const DOMAIN_RETRY_INTERVAL_MS = TUNNEL_RESTART_BACKOFF_SECONDS * 1000;
+const DOMAIN_RECOVERY_PROBE_INTERVAL_MS = 30000;
 const runtimeById = new Map();
 const probesInFlight = new Map();
 
@@ -20,6 +21,11 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
   const runtime = runtimeFor(definition.id);
   const rawStatus = String(process.rawStatus || "").toLowerCase();
   const entryRoutes = Array.isArray(options.entryRoutes) ? options.entryRoutes : [];
+  const httpProbeTimeoutMs = positiveMilliseconds(options.httpProbeTimeoutMs, HTTP_PROBE_TIMEOUT_MS);
+  const domainRecoveryProbeIntervalMs = positiveMilliseconds(
+    options.domainRecoveryProbeIntervalMs,
+    DOMAIN_RECOVERY_PROBE_INTERVAL_MS
+  );
   const networkState = currentNetworkState(
     options.networkStateFile || tunnelNetworkStatePath(definition.id),
     process,
@@ -134,16 +140,18 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
     });
   }
 
-  const probe = await probeTunnel(definition);
+  const probe = await probeTunnel(definition, { timeoutMs: httpProbeTimeoutMs });
   runtime.lastProbe = probe;
   runtime.nextRetryAt = null;
   if (probe.ok) {
     if (!runtime.connected) runtime.lastSuccessAt = new Date(now).toISOString();
     runtime.connected = true;
-    if (runtime.domainTerminal) {
+    const domainProbeDueAt = nextDomainProbeAt(runtime, domainRecoveryProbeIntervalMs);
+    if (domainProbeDueAt && now < domainProbeDueAt) {
+      runtime.nextRetryAt = new Date(domainProbeDueAt).toISOString();
       const domainEntry = runtime.lastDomainEntry || unavailableDomainEntry(entryRoutes, runtime.lastDomainError || "域名入口连接失败");
       return tunnelResult(definition, process, runtime, {
-        status: "connection_failed",
+        status: runtime.domainTerminal ? "connection_failed" : "retrying",
         active: true,
         health: "degraded",
         healthCheck: probe,
@@ -151,10 +159,15 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
         domainEntry: domainRetryDescriptor(domainEntry, runtime, definition)
       });
     }
-    const domainEntry = await probeDomainEntries(entryRoutes);
+    const domainEntry = await probeDomainEntries(entryRoutes, { timeoutMs: httpProbeTimeoutMs });
     rememberDomainEntry(runtime, domainEntry, now);
     if (domainEntry.configured && !domainEntry.ready) {
-      const exhausted = registerDomainFailure(runtime, definition, now);
+      const exhausted = registerDomainFailure(
+        runtime,
+        definition,
+        now,
+        domainRecoveryProbeIntervalMs
+      );
       return tunnelResult(definition, process, runtime, {
         status: exhausted ? "connection_failed" : "retrying",
         active: true,
@@ -234,23 +247,32 @@ export function latestTunnelError(logs) {
   return candidate.slice(-480);
 }
 
-export async function probeTunnel(definition) {
-  return cachedProbe(`tunnel:${definition.id}`, () => (
+export async function probeTunnel(definition, options = {}) {
+  const timeoutMs = positiveMilliseconds(options.timeoutMs, HTTP_PROBE_TIMEOUT_MS);
+  return cachedProbe(`tunnel:${definition.id}:${timeoutMs}`, () => (
     definition.healthUrl
-      ? probeHttp(definition.healthUrl, { maximumSuccessStatus: 499 })
+      ? probeHttp(definition.healthUrl, {
+          maximumSuccessStatus: 499,
+          timeoutMs
+        })
       : probeTcp(definition.bindAddress || "127.0.0.1", Number(definition.localPort))
   ));
 }
 
-export async function probeDomainEntries(routes) {
+export async function probeDomainEntries(routes, options = {}) {
   const configured = Array.isArray(routes) && routes.length > 0;
   if (!configured) return unavailableDomainEntry([], "");
+  const timeoutMs = positiveMilliseconds(options.timeoutMs, HTTP_PROBE_TIMEOUT_MS);
   const checks = await Promise.all(routes.map(async (route) => {
     if (route.enabled === false) {
       return entryCheckDescriptor(route, { error: "域名入口未启用" });
     }
-    const result = await cachedProbe(`entry:${route.id}:${route.url}`, () => (
-      probeHttp(route.url, { maximumSuccessStatus: 399 })
+    const result = await cachedProbe(`entry:${route.id}:${route.url}:${timeoutMs}`, () => (
+      probeHttp(route.url, {
+        maximumSuccessStatus: 399,
+        acceptedStatuses: [401, 403],
+        timeoutMs
+      })
     ));
     return entryCheckDescriptor(route, result);
   }));
@@ -400,7 +422,7 @@ function rememberDomainEntry(runtime, entry, now) {
   runtime.lastDomainError = message;
 }
 
-function registerDomainFailure(runtime, definition, now) {
+function registerDomainFailure(runtime, definition, now, recoveryProbeIntervalMs) {
   if (!runtime.domainLastAttemptAt || now - runtime.domainLastAttemptAt >= DOMAIN_RETRY_INTERVAL_MS - 250) {
     runtime.domainFailureCount += 1;
     runtime.domainLastAttemptAt = now;
@@ -408,9 +430,17 @@ function registerDomainFailure(runtime, definition, now) {
   const exhausted = runtime.domainFailureCount > tunnelRetryLimit(definition);
   runtime.domainTerminal = exhausted;
   runtime.nextRetryAt = exhausted
-    ? null
+    ? new Date(now + recoveryProbeIntervalMs).toISOString()
     : new Date(now + DOMAIN_RETRY_INTERVAL_MS).toISOString();
   return exhausted;
+}
+
+function nextDomainProbeAt(runtime, recoveryProbeIntervalMs) {
+  if (!runtime.domainFailureCount || !runtime.domainLastAttemptAt) return 0;
+  const interval = runtime.domainTerminal
+    ? recoveryProbeIntervalMs
+    : DOMAIN_RETRY_INTERVAL_MS;
+  return runtime.domainLastAttemptAt + interval;
 }
 
 function domainRetryDescriptor(entry, runtime, definition) {
@@ -465,17 +495,25 @@ async function cachedProbe(key, factory) {
   }
 }
 
-async function probeHttp(url, { maximumSuccessStatus }) {
+async function probeHttp(url, {
+  maximumSuccessStatus,
+  acceptedStatuses = [],
+  timeoutMs = HTTP_PROBE_TIMEOUT_MS
+}) {
+  timeoutMs = positiveMilliseconds(timeoutMs, HTTP_PROBE_TIMEOUT_MS);
   const started = performance.now();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), HTTP_PROBE_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       signal: controller.signal,
       redirect: "manual",
       headers: { "User-Agent": "Local-Ops-Tunnel-Health/1.0" }
     });
-    const ok = response.status >= 100 && response.status <= maximumSuccessStatus;
+    const ok = (
+      (response.status >= 100 && response.status <= maximumSuccessStatus)
+      || acceptedStatuses.includes(response.status)
+    );
     response.body?.cancel().catch(() => {});
     return {
       mode: "http",
@@ -492,7 +530,9 @@ async function probeHttp(url, { maximumSuccessStatus }) {
       ok: false,
       statusCode: null,
       latencyMs: null,
-      error: error?.name === "AbortError" ? "HTTP 健康检查超时（2 秒）" : cleanProbeError(error)
+      error: error?.name === "AbortError"
+        ? `HTTP 健康检查超时（${formatSeconds(timeoutMs)} 秒）`
+        : cleanProbeError(error)
     };
   } finally {
     clearTimeout(timer);
@@ -526,4 +566,14 @@ function cleanProbeError(error) {
   const code = String(error?.cause?.code || error?.code || "").trim();
   const message = String(error?.cause?.message || error?.message || error || "健康检查失败").trim();
   return code && !message.includes(code) ? `${code}: ${message}` : message;
+}
+
+function positiveMilliseconds(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function formatSeconds(milliseconds) {
+  const seconds = milliseconds / 1000;
+  return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1);
 }
