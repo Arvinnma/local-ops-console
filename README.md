@@ -12,6 +12,7 @@
   <a href="README.zh-CN.md">简体中文</a> ·
   <a href="https://github.com/Arvinnma/local-ops-console/releases/latest">Download</a> ·
   <a href="docs/USER_GUIDE.md">User guide</a> ·
+  <a href="docs/PROJECT_STATUS.md">Project status</a> ·
   <a href="SECURITY.md">Security</a>
 </p>
 
@@ -77,6 +78,8 @@ The **Needs Attention** card opens a detailed list of every stopped, unhealthy, 
 Before connecting, Local Ops reads the effective SSH configuration—including the real `HostName/Port` behind an alias—and probes that endpoint. If the boot-time network is unavailable, the card remains **Connecting** while its **SSH Host Network** detail explains that it is waiting for network. It starts on the next three-second retry after the endpoint becomes reachable, without a fixed startup delay. Tunnels no longer start merely because the service scheduler starts: connections triggered from the web UI, menu bar, or bulk controls retry up to 3 times, while tunnels restored by **Restore the Previous Session When the App Opens** retry up to 40 times. Only an exhausted retry budget becomes **Connection Failed**; the yellow action begins a new three-retry manual cycle.
 
 A tunnel is marked **Connected** only after its local HTTP path check receives a valid response. When an existing reverse-proxy target maps to that tunnel, Local Ops also checks the complete `.localhost` URL, including its configured path. The UI reports **SSH Tunnel: Connected** and **Domain Entry: Ready / Not Ready** separately, and the card reports **Connected** only when both configured layers pass. The complete entry is derived from the reverse-proxy configuration and is not duplicated in the SSH tunnel form.
+
+HTTP readiness probes use a ten-second timeout so a busy forwarded service is not falsely rejected after two seconds. Complete domain-entry checks accept `401` and `403` in addition to `2xx/3xx`: those responses prove that an authentication-protected application answered, not that login succeeded. A terminal domain-entry failure receives one low-frequency recovery probe every 30 seconds instead of remaining locked forever.
 
 See the [complete user guide](docs/USER_GUIDE.md) for field-by-field examples, Keychain behavior, startup semantics, backup scope, CLI commands, updates, uninstall steps, and troubleshooting.
 
@@ -156,6 +159,8 @@ Read [Development and Release Guide](docs/DEVELOPMENT.md) before changing packag
 ## Verification
 
 The v1.8.2 release gate covers syntax and unit tests, bilingual static-copy coverage, configuration round trips, API security checks, service lifecycle and logs, SSH network gating with bounded retries, complete domain-entry checks, Caddy path routing, Docker state reads, encrypted-key Keychain integration, silent login-item startup, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, mounted-DMG layout/signature checks, and an installed-app launch smoke test.
+
+Maintainers must consult [Authoritative Project Status](docs/PROJECT_STATUS.md) before describing a fix as public: the public GitHub release and the privately verified runtime can intentionally be at different commits. The repeatable verification sequence is in [Release and Hotfix Regression Manual](docs/RELEASE_REGRESSION.md).
 
 ## Contributing
 

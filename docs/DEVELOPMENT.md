@@ -4,6 +4,8 @@
 
 Local Ops v1.8.2 ships an Apple Silicon (`arm64`) macOS package. Intel (`x64`) and universal packages are not part of the current release matrix.
 
+Before describing a change as released, check [Authoritative Project Status](PROJECT_STATUS.md). It records the installed build, public GitHub/tag/artifact baseline, and private Forgejo/runtime baseline separately. A private post-release hotfix is not part of an older public tag merely because its App bundle still carries the same version number.
+
 ## Prerequisites
 
 - Apple Silicon Mac running macOS 12 or newer
@@ -131,21 +133,24 @@ To build, replace the app in Applications, re-sign ad hoc, verify the signature,
 
 ## Release gate
 
-1. Update root/desktop versions, lockfiles, cache query strings, changelog, issue template, READMEs, user guides, and release notes.
-2. Run `npm audit --omit=dev`, the desktop production audit, and the full desktop audit.
-3. Run syntax checks, unit tests, Keychain integration, installed smoke, automated browser QA, and optional Docker mutation smoke.
-4. Run Gitleaks against both Git history and the full working tree with redaction enabled.
-5. Build the DMG and verify:
+The command-by-command gate, cold-start matrix, `401/403` readiness semantics, installation checks, and result template live in [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md). The summary below does not replace that checklist.
+
+1. Establish and record the intended public and private baselines in [Authoritative Project Status](PROJECT_STATUS.md).
+2. Update root/desktop versions, lockfiles, cache query strings, changelog, issue template, READMEs, user guides, and release notes.
+3. Run `npm audit --omit=dev`, the desktop production audit, and the full desktop audit.
+4. Run syntax checks, unit tests, Keychain integration, installed smoke, automated browser QA, and optional Docker mutation smoke.
+5. Run Gitleaks against both Git history and the full working tree with redaction enabled.
+6. Build the DMG and verify:
    - `arm64` for the app executable, Caddy, Process Compose, and Keychain helper;
    - valid deep ad-hoc signature;
    - expected bundle identifier and version;
    - no real catalog, token, last-session file, `.env`, private key, or logs in the app/DMG;
    - mounted DMG layout/signature and installed-app launch;
    - upgrade preserves an existing user catalog.
-6. Re-run browser and menu-bar QA from the packaged app in Chinese and English.
-7. Generate the SHA-256 checksum and add it to the current file under `docs/releases/`.
-8. Commit and push only after the secret audit passes; verify CI.
-9. Create signed Git tag for the current version when possible and publish the GitHub Release with the arm64 DMG and checksum.
+7. Re-run browser and menu-bar QA from the packaged app in Chinese and English.
+8. Generate the SHA-256 checksum and add it to the current file under `docs/releases/`.
+9. Commit and push only after the secret audit passes; verify the intended remote ref rather than assuming every remote should advance.
+10. Create a signed Git tag for the current version when possible and publish the GitHub Release with the arm64 DMG and checksum.
 
 Public distribution should eventually replace ad-hoc signing with Apple Developer ID signing, Hardened Runtime, entitlements, and notarization.
 

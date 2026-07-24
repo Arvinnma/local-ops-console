@@ -20,6 +20,8 @@ The release is ad-hoc signed rather than Apple-notarized. If Gatekeeper blocks i
 
 Quit Local Ops, open the newer DMG, and replace the app in Applications. The next launch upgrades bundled backend files while preserving `catalog.json`, `last-session.json`, the local API token, Keychain entries, logs, and portless-access authorization.
 
+The current backend replacement restarts the Local Ops control plane and can also restart managed Process Compose worker processes, including SSH tunnels. Finish active transfers before upgrading and confirm the required services and listeners afterward.
+
 ### Window and app behavior
 
 - Closing the main window hides it; the menu-bar panel remains available.
@@ -131,7 +133,7 @@ Configure a local HTTP URL that is reachable through the tunnel, for example:
 http://127.0.0.1:18080/
 ```
 
-A listening local port does not prove the remote application is usable. Local Ops reports **Connected** only after this URL returns a valid HTTP response from 100 through 499. A 500 response, connection failure, or two-second timeout fails the check; repeated failures terminate the current SSH process and trigger automatic retry.
+A listening local port does not prove the remote application is usable. Local Ops reports **Connected** only after this URL returns a valid HTTP response from 100 through 499. A 500 response, connection failure, or ten-second timeout fails the check; repeated failures terminate the current SSH process and trigger automatic retry.
 
 - **Connecting**: includes waiting for network, establishing SSH, automatic retries, and a manual immediate retry. The primary button is disabled and stale error text is hidden.
 - **Connection Failed**: all 40 startup-restoration retries or all 3 manual retries ended without passing verification. The card shows the specific error and enables a yellow **Retry Now** button. Clicking it is a manual action and begins a new three-retry budget.
@@ -140,7 +142,7 @@ A listening local port does not prove the remote application is usable. Local Op
 
 Tunnel cards retain only four diagnostics: SSH Host Network, SSH Tunnel, Tunnel Health Check, and Domain Entry. Error text appears at the bottom only in **Connection Failed**; long errors scroll and remain available in a tooltip. Leaving the health URL blank falls back to a local TCP listener check, which cannot prove the remote target is reachable.
 
-If a Reverse Proxy target matches the tunnel's local listener, Local Ops automatically treats that route as the tunnel's complete domain entry and probes its actual URL, including the configured path. Entry checks accept 2xx / 3xx only: a wrong path returning 404 reports **Domain Entry: Not Ready** without restarting an otherwise healthy SSH tunnel. The UI distinguishes:
+If a Reverse Proxy target matches the tunnel's local listener, Local Ops automatically treats that route as the tunnel's complete domain entry and probes its actual URL, including the configured path. Entry checks accept `2xx`, `3xx`, `401`, and `403`. An authentication-protected service commonly returns `401 Unauthorized` or `403 Forbidden` before login; this proves that the route reached the application, not that user authentication succeeded. A wrong path returning `404`, a `5xx` response, a connection failure, or a ten-second timeout reports **Domain Entry: Not Ready** without restarting an otherwise healthy SSH tunnel. The UI distinguishes:
 
 - **SSH Tunnel: Connected** — the local health URL returned a valid response through the forward.
 - **Domain Entry: Ready** — the complete `.localhost` URL, including a protected entry path, returned success or redirect.
@@ -148,6 +150,8 @@ If a Reverse Proxy target matches the tunnel's local listener, Local Ops automat
 The card reports **Connected** only when every configured layer above passes. If no reverse-proxy entry is configured, only the SSH tunnel health check is required.
 
 The entry comes from the existing reverse-proxy configuration. It is never hard-coded for one project and does not add a duplicate field to the SSH tunnel form.
+
+Domain-entry failures follow the active 3- or 40-retry budget. Exhausting that budget reports **Connection Failed**, but it no longer permanently locks the card: Local Ops performs one low-frequency recovery probe every 30 seconds. When the domain entry responds again, the same healthy SSH process automatically returns to **Connected**. UI refreshes inside that interval reuse the recorded result instead of hammering a busy service.
 
 ### Encrypted private keys and Keychain
 

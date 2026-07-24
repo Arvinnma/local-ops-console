@@ -4,6 +4,17 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ## [Unreleased]
 
+### Fixed
+
+- Increase tunnel and complete-domain HTTP readiness timeouts from two to ten seconds so busy forwarded services do not produce false failures.
+- Treat complete-domain `401` and `403` responses as reachable authentication boundaries while keeping `404`, `5xx`, connection failures, and timeouts unready.
+- Throttle normal domain-entry retries to the existing three-second cadence and let a terminal domain failure probe once every 30 seconds, automatically recovering without restarting a healthy SSH process.
+
+### Documentation
+
+- Add an authoritative public/private baseline record and a repeatable release/hotfix regression manual.
+- Document the current backend-upgrade worker restart caveat and the distinction between readiness success and successful user authentication.
+
 ## [1.8.2] - 2026-07-21
 
 ### Fixed
