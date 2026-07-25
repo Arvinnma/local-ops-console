@@ -44,6 +44,7 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
       active: false,
       health: "unknown",
       healthCheck: healthCheckDescriptor(definition),
+      readinessCheck: readinessCheckDescriptor(definition),
       networkCheck,
       domainEntry: unavailableDomainEntry(entryRoutes, "SSH 隧道已停止")
     });
@@ -57,6 +58,7 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
         active: false,
         health: "unhealthy",
         healthCheck: healthCheckDescriptor(definition),
+        readinessCheck: readinessCheckDescriptor(definition),
         networkCheck,
         domainEntry: unavailableDomainEntry(entryRoutes, "SSH 隧道连接失败")
       });
@@ -67,6 +69,7 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
       active: false,
       health: "unknown",
       healthCheck: healthCheckDescriptor(definition),
+      readinessCheck: readinessCheckDescriptor(definition),
       networkCheck,
       domainEntry: unavailableDomainEntry(entryRoutes, "SSH 隧道已停止")
     });
@@ -90,6 +93,7 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
       active: true,
       health: "unhealthy",
       healthCheck: healthCheckDescriptor(definition),
+      readinessCheck: readinessCheckDescriptor(definition),
       networkCheck,
       domainEntry: unavailableDomainEntry(entryRoutes, "SSH 隧道正在重试")
     });
@@ -105,6 +109,7 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
         active: false,
         health: "unhealthy",
         healthCheck: healthCheckDescriptor(definition),
+        readinessCheck: readinessCheckDescriptor(definition),
         networkCheck,
         domainEntry: unavailableDomainEntry(entryRoutes, "SSH 隧道连接失败")
       });
@@ -114,6 +119,7 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
       active: Boolean(process.active),
       health: "unknown",
       healthCheck: healthCheckDescriptor(definition),
+      readinessCheck: readinessCheckDescriptor(definition),
       networkCheck,
       domainEntry: unavailableDomainEntry(entryRoutes, "SSH 隧道尚未连接")
     });
@@ -135,17 +141,19 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
       active: true,
       health: "waiting",
       healthCheck: healthCheckDescriptor(definition),
+      readinessCheck: readinessCheckDescriptor(definition),
       networkCheck,
       domainEntry: unavailableDomainEntry(entryRoutes, "正在等待 SSH 网络")
     });
   }
 
-  const probe = await probeTunnel(definition, { timeoutMs: httpProbeTimeoutMs });
+  const probe = await probeTunnel(definition);
   runtime.lastProbe = probe;
   runtime.nextRetryAt = null;
   if (probe.ok) {
     if (!runtime.connected) runtime.lastSuccessAt = new Date(now).toISOString();
     runtime.connected = true;
+    const readinessCheck = await probeTunnelReadiness(definition, { timeoutMs: httpProbeTimeoutMs });
     const domainProbeDueAt = nextDomainProbeAt(runtime, domainRecoveryProbeIntervalMs);
     if (domainProbeDueAt && now < domainProbeDueAt) {
       runtime.nextRetryAt = new Date(domainProbeDueAt).toISOString();
@@ -155,6 +163,7 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
         active: true,
         health: "degraded",
         healthCheck: probe,
+        readinessCheck,
         networkCheck,
         domainEntry: domainRetryDescriptor(domainEntry, runtime, definition)
       });
@@ -173,6 +182,7 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
         active: true,
         health: "degraded",
         healthCheck: probe,
+        readinessCheck,
         networkCheck,
         domainEntry: domainRetryDescriptor(domainEntry, runtime, definition)
       });
@@ -181,8 +191,9 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
     return tunnelResult(definition, process, runtime, {
       status: "connected",
       active: true,
-      health: domainEntry.configured && !domainEntry.ready ? "degraded" : "healthy",
+      health: (!readinessCheck.ok || (domainEntry.configured && !domainEntry.ready)) ? "degraded" : "healthy",
       healthCheck: probe,
+      readinessCheck,
       networkCheck,
       domainEntry
     });
@@ -197,6 +208,7 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
     active: true,
     health: "unhealthy",
     healthCheck: probe,
+    readinessCheck: readinessCheckDescriptor(definition),
     networkCheck,
     domainEntry: unavailableDomainEntry(entryRoutes, "SSH 隧道尚未通过健康检查")
   });
@@ -248,15 +260,22 @@ export function latestTunnelError(logs) {
 }
 
 export async function probeTunnel(definition, options = {}) {
-  const timeoutMs = positiveMilliseconds(options.timeoutMs, HTTP_PROBE_TIMEOUT_MS);
-  return cachedProbe(`tunnel:${definition.id}:${timeoutMs}`, () => (
-    definition.healthUrl
-      ? probeHttp(definition.healthUrl, {
-          maximumSuccessStatus: 499,
-          timeoutMs
-        })
-      : probeTcp(definition.bindAddress || "127.0.0.1", Number(definition.localPort))
+  const timeoutMs = positiveMilliseconds(options.timeoutMs, TCP_PROBE_TIMEOUT_MS);
+  return cachedProbe(`tunnel:${definition.id}:tcp:${timeoutMs}`, () => (
+    probeTcp(definition.bindAddress || "127.0.0.1", Number(definition.localPort), timeoutMs)
   ));
+}
+
+export async function probeTunnelReadiness(definition, options = {}) {
+  if (!definition.healthUrl) return readinessCheckDescriptor(definition);
+  const timeoutMs = positiveMilliseconds(options.timeoutMs, HTTP_PROBE_TIMEOUT_MS);
+  return cachedProbe(`tunnel-readiness:${definition.id}:${timeoutMs}`, async () => ({
+    configured: true,
+    ...(await probeHttp(definition.healthUrl, {
+      maximumSuccessStatus: 499,
+      timeoutMs
+    }))
+  }));
 }
 
 export async function probeDomainEntries(routes, options = {}) {
@@ -322,11 +341,12 @@ function resetInactiveRuntime(runtime) {
 function tunnelResult(definition, process, runtime, overrides) {
   const domainEntry = overrides.domainEntry || unavailableDomainEntry([], "");
   const connected = overrides.status === "connected" && Boolean(overrides.healthCheck?.ok);
+  const readinessCheck = overrides.readinessCheck || readinessCheckDescriptor(definition);
   return {
     ...process,
     ...overrides,
     connectionStatus: overrides.status,
-    fullyAvailable: connected && (!domainEntry.configured || domainEntry.ready),
+    fullyAvailable: connected && readinessCheck.ok && (!domainEntry.configured || domainEntry.ready),
     lastConnectionError: runtime.lastError,
     lastConnectionErrorAt: runtime.lastErrorAt,
     lastConnectedAt: runtime.lastSuccessAt,
@@ -335,6 +355,7 @@ function tunnelResult(definition, process, runtime, overrides) {
     nextRetryAt: runtime.nextRetryAt,
     networkCheck: overrides.networkCheck || networkCheckDescriptor(definition, null),
     healthCheck: overrides.healthCheck || runtime.lastProbe || healthCheckDescriptor(definition),
+    readinessCheck,
     domainEntry: {
       ...domainEntry,
       lastReadyAt: runtime.lastDomainReadyAt,
@@ -345,15 +366,26 @@ function tunnelResult(definition, process, runtime, overrides) {
 }
 
 function healthCheckDescriptor(definition) {
-  return definition.healthUrl
-    ? { mode: "http", target: definition.healthUrl, ok: false, statusCode: null, latencyMs: null }
-    : {
-        mode: "tcp",
-        target: `tcp://${definition.bindAddress || "127.0.0.1"}:${definition.localPort}`,
-        ok: false,
-        statusCode: null,
-        latencyMs: null
-      };
+  return {
+    mode: "tcp",
+    target: `tcp://${definition.bindAddress || "127.0.0.1"}:${definition.localPort}`,
+    ok: false,
+    statusCode: null,
+    latencyMs: null,
+    error: ""
+  };
+}
+
+function readinessCheckDescriptor(definition) {
+  return {
+    configured: Boolean(definition.healthUrl),
+    mode: definition.healthUrl ? "http" : "none",
+    target: definition.healthUrl || "",
+    ok: !definition.healthUrl,
+    statusCode: null,
+    latencyMs: null,
+    error: ""
+  };
 }
 
 function networkCheckDescriptor(definition, state) {
@@ -539,7 +571,7 @@ async function probeHttp(url, {
   }
 }
 
-function probeTcp(host, port) {
+function probeTcp(host, port, timeoutMs = TCP_PROBE_TIMEOUT_MS) {
   const started = performance.now();
   return new Promise((resolve) => {
     const socket = net.createConnection({ host, port });
@@ -556,7 +588,7 @@ function probeTcp(host, port) {
         ...result
       });
     };
-    socket.setTimeout(TCP_PROBE_TIMEOUT_MS, () => finish({ ok: false, error: "TCP 健康检查超时（1.5 秒）" }));
+    socket.setTimeout(timeoutMs, () => finish({ ok: false, error: `TCP 健康检查超时（${formatSeconds(timeoutMs)} 秒）` }));
     socket.once("connect", () => finish({ ok: true, error: "" }));
     socket.once("error", (error) => finish({ ok: false, error: cleanProbeError(error) }));
   });

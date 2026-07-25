@@ -13,6 +13,7 @@ export const WORKER_COMPOSE_PATH = path.join(ROOT, "generated", "services.yaml")
 export const CADDYFILE_PATH = path.join(ROOT, "generated", "Caddyfile");
 export const RUNTIME_DIR = path.join(ROOT, "runtime");
 export const TUNNEL_STATE_DIR = path.join(RUNTIME_DIR, "tunnels");
+export const PROCESS_LIFECYCLE_PATH = path.join(RUNTIME_DIR, "process-lifecycle.json");
 
 export const BINARIES = {
   processCompose: findBinary("process-compose"),
@@ -554,8 +555,7 @@ export function renderWorkerCompose(catalog, options = {}) {
       namespace: service.namespace || "services",
       description: service.description || service.name,
       restart: service.restartPolicy,
-      disabled: !service.autoStart,
-      readiness: service.healthUrl ? parseHealthUrl(service.healthUrl) : null
+      disabled: !service.autoStart
     });
   }
 
@@ -586,21 +586,7 @@ export function renderWorkerCompose(catalog, options = {}) {
       restart: "always",
       backoffSeconds: TUNNEL_RESTART_BACKOFF_SECONDS,
       maxRestarts: retryLimit,
-      disabled: true,
-      readinessExec: tunnel.healthUrl ? {
-        command: tunnelHealthProbeCommand(tunnel.healthUrl, stateFile, true),
-        initialDelaySeconds: 1,
-        periodSeconds: 2,
-        timeoutSeconds: 2,
-        failureThreshold: 1
-      } : null,
-      livenessExec: tunnel.healthUrl ? {
-        command: tunnelHealthProbeCommand(tunnel.healthUrl, stateFile),
-        initialDelaySeconds: 3,
-        periodSeconds: 3,
-        timeoutSeconds: 2,
-        failureThreshold: 2
-      } : null
+      disabled: true
     });
   }
   return `${lines.join("\n")}\n`;
@@ -695,29 +681,6 @@ function renderCaddyfile(catalog) {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-function parseHealthUrl(value) {
-  const url = new URL(value);
-  return {
-    host: url.hostname,
-    port: Number(url.port || (url.protocol === "https:" ? 443 : 80)),
-    path: `${url.pathname}${url.search}`,
-    scheme: url.protocol.replace(":", "")
-  };
-}
-
-function tunnelHealthProbeCommand(value, waitingStateFile = "", includeConnectingGrace = false) {
-  const args = [
-    shellQuote(BINARIES.node),
-    shellQuote(path.join(ROOT, "scripts", "tunnel-http-health.mjs")),
-    shellQuote(value)
-  ];
-  if (waitingStateFile) {
-    args.push("--allow-waiting-network", shellQuote(waitingStateFile));
-  }
-  if (includeConnectingGrace) args.push("--connecting-grace-ms", "7000");
-  return args.join(" ");
-}
-
 function managedTunnelCommand(tunnel, sshCommand, stateFile, retryLimit) {
   return [
     "exec",
@@ -725,6 +688,7 @@ function managedTunnelCommand(tunnel, sshCommand, stateFile, retryLimit) {
     shellQuote(path.join(ROOT, "scripts", "run-managed-tunnel.mjs")),
     "--id", shellQuote(tunnel.id),
     "--state", shellQuote(stateFile),
+    "--lifecycle", shellQuote(PROCESS_LIFECYCLE_PATH),
     "--host", shellQuote(tunnel.sshHost),
     "--port", shellQuote(String(tunnel.sshPort || 22)),
     "--retry-limit", shellQuote(String(retryLimit)),

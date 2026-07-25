@@ -101,15 +101,30 @@ test("renders manually started SSH tunnels with three retries and no scheduler a
   assert.match(compose, /max_restarts: 3/);
   assert.match(compose, /disabled: true/);
   assert.match(compose, /--retry-limit '3'/);
+  assert.match(compose, /--lifecycle '[^']*process-lifecycle\.json'/);
   assert.match(compose, /run-managed-tunnel\.mjs/);
   assert.match(compose, /--host.*example\.com/);
-  assert.match(compose, /--allow-waiting-network/);
-  assert.match(compose, /--connecting-grace-ms 7000/);
-  assert.match(compose, /readiness_probe:/);
-  assert.match(compose, /liveness_probe:/);
-  assert.match(compose, /tunnel-http-health\.mjs/);
-  assert.match(compose, /http:\/\/127\.0\.0\.1:18080\//);
-  assert.match(compose, /period_seconds: 3/);
+  assert.doesNotMatch(compose, /readiness_probe:/);
+  assert.doesNotMatch(compose, /liveness_probe:/);
+  assert.doesNotMatch(compose, /tunnel-http-health\.mjs/);
+});
+
+test("keeps user-service HTTP health checks out of Process Compose lifecycle probes", () => {
+  const catalog = structuredClone(loadCatalog());
+  catalog.services = [normalizeService({
+    id: "degraded-dashboard",
+    name: "Degraded Dashboard",
+    kind: "node",
+    command: "node server.mjs",
+    workingDir: "/tmp",
+    healthUrl: "http://127.0.0.1:19891/api/health"
+  })];
+  catalog.tunnels = [];
+  const compose = renderWorkerCompose(catalog);
+  assert.match(compose, /degraded-dashboard:/);
+  assert.doesNotMatch(compose, /readiness_probe:/);
+  assert.doesNotMatch(compose, /liveness_probe:/);
+  assert.doesNotMatch(compose, /19891/);
 });
 
 test("startup-restored SSH tunnels use a forty-retry runtime policy", () => {

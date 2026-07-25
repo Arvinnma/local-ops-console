@@ -279,6 +279,7 @@ const ENGLISH = new Map(Object.entries({
   "控制面在线": "Control plane online",
   "控制面离线": "Control plane offline",
   "健康检查异常": "Health check failed",
+  "服务降级": "Service Degraded",
   "健康检查": "Health Check",
   "SSH 隧道": "SSH Tunnel",
   "域名入口": "Domain Entry",

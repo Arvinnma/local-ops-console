@@ -304,7 +304,7 @@ function attentionItems() {
     .filter((item) => !isProcessHealthy(item))
     .map((item) => {
       const stopped = !isProcessActive(item);
-      const unhealthy = item.health === "unhealthy";
+      const unhealthy = ["unhealthy", "degraded"].includes(item.health);
       return {
         id: item.id,
         name: item.name,
@@ -518,10 +518,11 @@ function renderServicesTable() {
   body.innerHTML = processes.length ? processes.map((item) => {
     const index = userIds.indexOf(item.id);
     const editable = index >= 0;
+    const displayStatus = item.status === "running" && item.health === "degraded" ? "degraded" : item.status;
     return `<tr ${editable ? sortItemAttributes("service", item.id) : ""}>
       <td><div class="table-name">${resourceIcon(item.icon, item.kind === "docker" ? "docker" : "nodejs")}<span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.description || item.id)}</small></span></div></td>
       <td>${escapeHtml(item.namespace)}</td>
-      <td><span class="status-pill ${escapeHtml(item.status)}">${statusLabel(item.status)}</span></td>
+      <td><span class="status-pill ${escapeHtml(displayStatus)}">${statusLabel(displayStatus)}</span></td>
       <td class="mono">${item.pid || "—"}</td>
       <td>${item.restarts || 0}</td>
       <td class="action-cell">${processControls(item, editable ? { editAction: "edit-service", deleteAction: "delete-service" } : {})}</td>
@@ -561,13 +562,16 @@ function renderTunnelCards() {
 
 function tunnelRuntimeDetails(process, displayState) {
   const health = process.healthCheck || {};
+  const readiness = process.readinessCheck || {};
   const network = process.networkCheck || {};
   const entry = process.domainEntry || {};
-  const healthResult = health.ok
-    ? health.mode === "http"
-      ? `HTTP ${health.statusCode}${health.latencyMs == null ? "" : ` · ${health.latencyMs} ms`}`
-      : `${tr("TCP 已连通")}${health.latencyMs == null ? "" : ` · ${health.latencyMs} ms`}`
-    : statusLabel(displayState);
+  const healthResult = readiness.configured
+    ? readiness.ok
+      ? `HTTP ${readiness.statusCode}${readiness.latencyMs == null ? "" : ` · ${readiness.latencyMs} ms`}`
+      : tr("未就绪")
+    : health.ok
+      ? `${tr("TCP 已连通")}${health.latencyMs == null ? "" : ` · ${health.latencyMs} ms`}`
+      : statusLabel(displayState);
   const sshStatus = health.ok
     ? tr("已连接")
     : displayState === "stopped"
@@ -590,7 +594,7 @@ function tunnelRuntimeDetails(process, displayState) {
     <div class="tunnel-layer-state"><small>${tr("SSH 隧道")}</small><strong class="${health.ok ? "runtime-ready" : displayState === "connecting" ? "runtime-pending" : "runtime-not-ready"}" title="${escapeAttribute(health.target || "")}">${escapeHtml(sshStatus)}</strong></div>
     <div class="tunnel-layer-state"><small>${tr("域名入口")}</small><strong class="${entryClass}" title="${escapeAttribute(entry.target || entry.lastError || "")}">${escapeHtml(entryStatus)}</strong></div>
     <div><small>${tr("SSH 主机网络")}</small><strong title="${escapeAttribute(network.target || "")}">${escapeHtml(networkResult)}</strong></div>
-    <div><small>${tr("隧道健康检查")}</small><strong title="${escapeAttribute(health.target || "")}">${escapeHtml(healthResult)}</strong></div>
+    <div><small>${tr("隧道健康检查")}</small><strong title="${escapeAttribute(readiness.target || readiness.error || health.target || "")}">${escapeHtml(healthResult)}</strong></div>
   </div>`;
 }
 
@@ -1718,6 +1722,7 @@ async function request(url, options = {}) {
   }
   if (init.method !== "GET" && init.method !== "HEAD" && ui.bootstrap?.csrfToken) {
     init.headers["X-Local-Ops-Token"] = ui.bootstrap.csrfToken;
+    init.headers["X-Local-Ops-Requested-By"] = "ui";
   }
   const response = await fetch(url, init);
   const payload = await response.json().catch(() => ({}));
@@ -1770,6 +1775,7 @@ function statusLabel(status) {
     stopped: "已停止",
     disabled: "未启用",
     unhealthy: "健康检查异常",
+    degraded: "服务降级",
     offline: "离线",
     online: "在线",
     unknown: "未知"
@@ -1786,7 +1792,7 @@ function isProcessHealthy(item) {
       && item.healthCheck?.ok
       && (!item.domainEntry?.configured || item.fullyAvailable);
   }
-  return item.status === "running" && item.health !== "unhealthy";
+  return item.status === "running" && !["unhealthy", "degraded"].includes(item.health);
 }
 
 function actionLabel(action) {

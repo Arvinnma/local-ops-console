@@ -909,7 +909,10 @@ async function runTrayMutation(actionKey, requestPath, timeout = 30000) {
     const bootstrap = await controlRequestJson("/api/bootstrap");
     await controlRequestJson(requestPath, {
       method: "POST",
-      headers: { "X-Local-Ops-Token": bootstrap.csrfToken },
+      headers: {
+        "X-Local-Ops-Token": bootstrap.csrfToken,
+        "X-Local-Ops-Requested-By": "tray"
+      },
       timeout
     });
   } finally {
@@ -1191,7 +1194,10 @@ async function applyAppStartupActionsOnce() {
     const bootstrap = await controlRequestJson("/api/bootstrap");
     const result = await controlRequestJson("/api/startup/app", {
       method: "POST",
-      headers: { "X-Local-Ops-Token": bootstrap.csrfToken },
+      headers: {
+        "X-Local-Ops-Token": bootstrap.csrfToken,
+        "X-Local-Ops-Requested-By": "app-startup"
+      },
       timeout: 210000
     });
     const started = Number(result.services || 0) + Number(result.tunnels || 0) + Number(result.docker || 0);

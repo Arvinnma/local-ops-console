@@ -6,13 +6,16 @@ import fs from "node:fs";
 import {
   NETWORK_RETRY_INTERVAL_MS,
   probeTcpEndpoint,
+  readTunnelNetworkState,
   resolveSshEndpoint,
   writeTunnelNetworkState
 } from "../src/tunnel-network.mjs";
+import { recordProcessLifecycle } from "../src/process-lifecycle.mjs";
 
 const options = parseArguments(process.argv.slice(2));
 let child = null;
 let stopping = false;
+let stopContext = null;
 let networkAttempts = 0;
 const startedAt = new Date().toISOString();
 
@@ -82,7 +85,7 @@ function runSshCommand(endpoint, networkCheck) {
   child.once("exit", (code, signal) => {
     child = null;
     if (stopping) {
-      updateState("stopped", { endpoint, networkAttempts, stoppedAt: new Date().toISOString(), error: "" });
+      finishStoppedState({ endpoint, networkAttempts });
       process.exit(0);
     }
     const exitCode = Number.isInteger(code) ? code : 1;
@@ -95,13 +98,51 @@ function runSshCommand(endpoint, networkCheck) {
 function stop(signal) {
   if (stopping) return;
   stopping = true;
+  stopContext = resolveStopContext(signal);
   if (!child) {
-    updateState("stopped", { stoppedAt: new Date().toISOString(), error: "" });
+    finishStoppedState();
     process.exit(0);
   }
   child.kill(signal === "SIGHUP" ? "SIGTERM" : signal);
   const forceTimer = setTimeout(() => child?.kill("SIGKILL"), 2000);
   forceTimer.unref();
+}
+
+function resolveStopContext(signal) {
+  const state = readTunnelNetworkState(options.stateFile);
+  if (state?.phase === "stopping" && state.stopReason && state.requestedBy) {
+    return {
+      requestedBy: state.requestedBy,
+      stopReason: state.stopReason,
+      stopRequestedAt: state.stopRequestedAt || state.updatedAt || new Date().toISOString(),
+      signal
+    };
+  }
+  return {
+    requestedBy: "orchestrator",
+    stopReason: `signal:${signal}`,
+    stopRequestedAt: new Date().toISOString(),
+    signal
+  };
+}
+
+function finishStoppedState(details = {}) {
+  const stoppedAt = new Date().toISOString();
+  const context = stopContext || resolveStopContext("unknown");
+  updateState("stopped", {
+    ...details,
+    ...context,
+    stoppedAt,
+    error: ""
+  });
+  recordProcessLifecycle(options.lifecycleFile, {
+    id: options.id,
+    kind: "tunnel",
+    action: "stop",
+    requestedBy: context.requestedBy,
+    reason: context.stopReason,
+    at: stoppedAt
+  });
 }
 
 function updateState(phase, details = {}) {
@@ -127,7 +168,7 @@ function parseArguments(args) {
     if (!key?.startsWith("--") || value === undefined) fail(`无效参数：${key || ""}`);
     values.set(key.slice(2), value);
   }
-  for (const key of ["id", "state", "host", "port", "retry-limit", "destination", "command", "working-dir"]) {
+  for (const key of ["id", "state", "lifecycle", "host", "port", "retry-limit", "destination", "command", "working-dir"]) {
     if (!values.get(key)) fail(`缺少参数 --${key}`);
   }
   const port = Number(values.get("port"));
@@ -137,6 +178,7 @@ function parseArguments(args) {
   return {
     id: values.get("id"),
     stateFile: values.get("state"),
+    lifecycleFile: values.get("lifecycle"),
     host: values.get("host"),
     port,
     retryLimit,

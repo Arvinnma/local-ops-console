@@ -28,6 +28,7 @@ export function tunnelFailureMessage(process = {}, displayState = tunnelDisplayS
   if (displayState !== "connection_failed") return "";
 
   const entry = process.domainEntry || {};
+  const readiness = process.readinessCheck || {};
   const health = process.healthCheck || {};
   const network = process.networkCheck || {};
   if (isDomainOnlyFailure(process)) {
@@ -36,6 +37,7 @@ export function tunnelFailureMessage(process = {}, displayState = tunnelDisplayS
   return process.lastConnectionError
     || health.error
     || network.error
+    || (readiness.configured && !readiness.ok ? readiness.error : "")
     || (entry.configured && !entry.ready ? entry.lastError || entry.error : "")
     || "SSH 隧道连接失败";
 }

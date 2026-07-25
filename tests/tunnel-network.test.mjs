@@ -27,6 +27,7 @@ test("parses the effective HostName and port from ssh -G output", () => {
 test("managed tunnels fail fast while the SSH endpoint is unavailable and connect on the next retry", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "local-ops-network-"));
   const stateFile = path.join(directory, "state.json");
+  const lifecycleFile = path.join(directory, "process-lifecycle.json");
   const reserved = net.createServer();
   await listen(reserved);
   const port = reserved.address().port;
@@ -36,6 +37,7 @@ test("managed tunnels fail fast while the SSH endpoint is unavailable and connec
     RUNNER,
     "--id", "network-fixture",
     "--state", stateFile,
+    "--lifecycle", lifecycleFile,
     "--host", "127.0.0.1",
     "--port", String(port),
     "--retry-limit", "3",
@@ -67,11 +69,25 @@ test("managed tunnels fail fast while the SSH endpoint is unavailable and connec
   assert.equal(connecting.networkCheck.ok, true);
   assert.ok(Date.now() - connectedAt < 2500, "the next scheduler retry should connect without an extra fixed delay");
 
+  fs.writeFileSync(stateFile, JSON.stringify({
+    ...connecting,
+    phase: "stopping",
+    updatedAt: new Date().toISOString(),
+    requestedBy: "ui",
+    stopReason: "explicit_stop",
+    stopRequestedAt: new Date().toISOString()
+  }));
   retryRunner.kill("SIGTERM");
   const exitCode = await waitForExit(retryRunner);
   assert.equal(exitCode, 0);
   const stopped = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.equal(stopped.phase, "stopped");
+  assert.equal(stopped.requestedBy, "ui");
+  assert.equal(stopped.stopReason, "explicit_stop");
+  assert.match(stopped.stoppedAt, /^\d{4}-/);
+  const lifecycle = JSON.parse(fs.readFileSync(lifecycleFile, "utf8"));
+  assert.equal(lifecycle.processes["network-fixture"].lastStop.requestedBy, "ui");
+  assert.equal(lifecycle.processes["network-fixture"].lastStop.reason, "explicit_stop");
 });
 
 function listen(server, port = 0) {

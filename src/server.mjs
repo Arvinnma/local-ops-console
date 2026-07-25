@@ -9,6 +9,7 @@ import {
   BINARIES,
   CADDYFILE_PATH,
   PROCESS_COMPOSE_PATH,
+  PROCESS_LIFECYCLE_PATH,
   ROOT,
   SSH_ASKPASS_PATH,
   SYSTEM_PROCESS_DEFINITIONS,
@@ -31,6 +32,7 @@ import {
   renderSshCommand,
   routeUrl,
   saveCatalog,
+  tunnelNetworkStatePath,
   validateCatalog
 } from "./config.mjs";
 import {
@@ -40,7 +42,18 @@ import {
   readPrivateKeyPassphrase,
   storePrivateKeyPassphrase
 } from "./keychain.mjs";
+import {
+  lifecycleForProcess,
+  processMutationActor,
+  readProcessLifecycle,
+  reconcileRememberedProcessIds,
+  recordProcessActionRequest,
+  recordProcessLifecycle,
+  shouldAuditObservedStop
+} from "./process-lifecycle.mjs";
 import { enrichTunnelProcess, pruneTunnelRuntime, resetTunnelRuntime } from "./tunnel-health.mjs";
+import { enrichServiceProcess } from "./service-health.mjs";
+import { readTunnelNetworkState, writeTunnelNetworkState } from "./tunnel-network.mjs";
 
 const execFileAsync = promisify(execFile);
 const PUBLIC_DIR = path.join(ROOT, "public");
@@ -109,14 +122,30 @@ const server = http.createServer(async (request, response) => {
       if (definition.protected && action !== "restart") {
         throw httpError(403, "控制台自身不能从网页停止");
       }
+      const requestedBy = processMutationActor(request.headers);
+      const at = new Date().toISOString();
       if (definition.kind === "tunnel" && action !== "stop") await assertPassphraseAvailable(definition);
+      recordProcessActionRequest(PROCESS_LIFECYCLE_PATH, {
+        id,
+        kind: definition.kind,
+        action,
+        requestedBy,
+        at
+      });
+      if (definition.kind === "tunnel" && action === "restart") {
+        markTunnelStopRequested(definition, requestedBy, action, at);
+      }
       if (definition.kind === "tunnel" && action !== "stop") {
         await configureTunnelRetryLimits(catalog, [id], TUNNEL_MANUAL_RETRY_LIMIT);
       }
       if (definition.kind === "tunnel") resetTunnelRuntime(id);
-      await processAction(catalog, id, action);
+      await processAction(catalog, id, action, {
+        beforeRun: definition.kind === "tunnel" && action === "stop"
+          ? () => markTunnelStopRequested(definition, requestedBy, action, at)
+          : null
+      });
       invalidateState();
-      return sendJson(response, 200, { ok: true, id, action });
+      return sendJson(response, 200, { ok: true, id, action, requestedBy, requestedAt: at });
     }
 
     const dockerActionMatch = /^\/api\/docker\/([^/]+)\/(start|stop|restart)$/.exec(url.pathname);
@@ -471,18 +500,29 @@ async function getState(catalog, force = false) {
 
   const routes = catalog.routes.map((route) => ({ ...route, url: routeUrl(catalog, route) }));
   const definitions = processDefinitions(catalog);
+  const lifecycle = readProcessLifecycle(PROCESS_LIFECYCLE_PATH);
   const rawByName = new Map(rawProcesses.map((item) => [String(item.name || item.process || item.process_name), item]));
   pruneTunnelRuntime(catalog.tunnels.map((item) => item.id));
   const processes = await Promise.all(definitions.map(async (definition) => {
     const process = normalizeProcess(definition, rawByName.get(definition.id));
-    if (definition.kind !== "tunnel") return process;
+    const processLifecycle = auditObservedStop(
+      definition,
+      process,
+      lifecycleForProcess(lifecycle, definition.id)
+    );
+    if (definition.kind !== "tunnel") {
+      return attachLifecycle(
+        await enrichServiceProcess(definition, process),
+        processLifecycle
+      );
+    }
     const enriched = await enrichTunnelProcess(definition, process, {
       readLogs: () => processLogs(catalog, definition.id, 40),
       entryRoutes: routes.filter((route) => routeTargetsTunnel(route, definition)),
       retryLimit: activeTunnelRetryLimit(definition.id)
     });
     if (enriched.active && enriched.retryLimit) tunnelRetryLimits.set(definition.id, enriched.retryLimit);
-    return enriched;
+    return attachLifecycle(enriched, processLifecycle);
   }));
   const external = await Promise.all(catalog.externalServices.map(probeExternal));
   const routeStates = routes.map((route) => {
@@ -722,6 +762,14 @@ async function applyAppStartupActions(catalog) {
     if (tunnel && !startupTunnelSet.has(item.id)) continue;
     try {
       if (tunnel) resetTunnelRuntime(item.id);
+      recordProcessLifecycle(PROCESS_LIFECYCLE_PATH, {
+        id: item.id,
+        kind: item.kind || (tunnel ? "tunnel" : "service"),
+        desiredState: "running",
+        action: "start",
+        requestedBy: "app-startup",
+        reason: "restore_last_session"
+      });
       await processAction(catalog, item.id, "start");
       if (tunnel) tunnels += 1;
       else services += 1;
@@ -755,10 +803,20 @@ function captureLastSessionState(catalog) {
     const processMap = new Map(state.processes.map((item) => [item.id, item]));
     const workerReadable = state.orchestrator.workerOnline !== false;
     const services = workerReadable
-      ? catalog.services.filter((item) => processMap.get(item.id)?.active).map((item) => item.id)
+      ? reconcileRememberedProcessIds({
+          file: PROCESS_LIFECYCLE_PATH,
+          definitions: catalog.services,
+          activeIds: catalog.services.filter((item) => processMap.get(item.id)?.active).map((item) => item.id),
+          previousIds: previous.services
+        })
       : previous.services;
     const tunnels = workerReadable
-      ? catalog.tunnels.filter((item) => processMap.get(item.id)?.active).map((item) => item.id)
+      ? reconcileRememberedProcessIds({
+          file: PROCESS_LIFECYCLE_PATH,
+          definitions: catalog.tunnels,
+          activeIds: catalog.tunnels.filter((item) => processMap.get(item.id)?.active).map((item) => item.id),
+          previousIds: previous.tunnels
+        })
       : previous.tunnels;
     const dockerContainers = docker.available
       ? docker.daemonOnline
@@ -939,7 +997,7 @@ async function processLogs(catalog, id, tail) {
   }
 }
 
-async function processAction(catalog, id, action) {
+async function processAction(catalog, id, action, options = {}) {
   const definition = assertKnownProcess(catalog, id);
   const previous = processActionQueues.get(id) || Promise.resolve();
   const task = previous.catch(() => {}).then(async () => {
@@ -951,6 +1009,7 @@ async function processAction(catalog, id, action) {
       if (action === "start" && current.active) return { skipped: true };
       if (action === "stop" && !current.active) return { skipped: true };
     }
+    if (typeof options.beforeRun === "function") await options.beforeRun();
     await runProcessCompose(catalog, ["process", action, id], role);
     return { skipped: false };
   });
@@ -960,6 +1019,48 @@ async function processAction(catalog, id, action) {
   } finally {
     if (processActionQueues.get(id) === task) processActionQueues.delete(id);
   }
+}
+
+function attachLifecycle(process, lifecycle) {
+  if (!lifecycle) return process;
+  return {
+    ...process,
+    desiredState: lifecycle.desiredState || null,
+    lastLifecycleAction: lifecycle.lastAction,
+    lastStart: lifecycle.lastStart,
+    lastStop: lifecycle.lastStop,
+    stopReason: lifecycle.lastStop?.reason || "",
+    requestedBy: lifecycle.lastStop?.requestedBy || "",
+    stoppedAt: lifecycle.lastStop?.at || null
+  };
+}
+
+function auditObservedStop(definition, process, lifecycle) {
+  if (!shouldAuditObservedStop(lifecycle, process)) return lifecycle;
+  return recordProcessLifecycle(PROCESS_LIFECYCLE_PATH, {
+    id: definition.id,
+    kind: definition.kind,
+    action: "stop",
+    requestedBy: "orchestrator",
+    reason: process.exitCode == null
+      ? `observed_${process.rawStatus || process.status || "stopped"}`
+      : `observed_exit:${process.exitCode}`
+  });
+}
+
+function markTunnelStopRequested(definition, requestedBy, action, at) {
+  const file = tunnelNetworkStatePath(definition.id);
+  const previous = readTunnelNetworkState(file) || {};
+  writeTunnelNetworkState(file, {
+    ...previous,
+    version: 1,
+    tunnelId: definition.id,
+    updatedAt: at,
+    phase: "stopping",
+    requestedBy,
+    stopReason: action === "restart" ? "restart_requested" : "explicit_stop",
+    stopRequestedAt: at
+  });
 }
 
 async function launchTerminalTask(task) {

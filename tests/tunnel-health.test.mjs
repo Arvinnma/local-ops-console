@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,10 +10,11 @@ import {
   enrichTunnelProcess,
   latestTunnelError,
   probeTunnel,
+  probeTunnelReadiness,
   resetTunnelRuntime
 } from "../src/tunnel-health.mjs";
 
-test("an HTTP tunnel is connected only after a valid response", async (t) => {
+test("SSH tunnel liveness uses TCP while HTTP is reported separately as readiness", async (t) => {
   const server = http.createServer((_request, response) => {
     response.writeHead(200, { "Content-Type": "text/plain" });
     response.end("ready");
@@ -26,17 +28,24 @@ test("an HTTP tunnel is connected only after a valid response", async (t) => {
   const definition = tunnelDefinition("healthy-http", server.address().port);
   const probe = await probeTunnel(definition);
   assert.equal(probe.ok, true);
-  assert.equal(probe.statusCode, 200);
+  assert.equal(probe.mode, "tcp");
+  assert.equal(probe.statusCode, null);
+  const readiness = await probeTunnelReadiness(definition);
+  assert.equal(readiness.ok, true);
+  assert.equal(readiness.statusCode, 200);
 
   resetTunnelRuntime(definition.id);
   const result = await enrichTunnelProcess(definition, runningProcess(), { now: 1_000_000 });
   assert.equal(result.status, "connected");
   assert.equal(result.active, true);
   assert.equal(result.health, "healthy");
+  assert.equal(result.healthCheck.mode, "tcp");
+  assert.equal(result.readinessCheck.mode, "http");
+  assert.equal(result.readinessCheck.ok, true);
   assert.equal(result.lastConnectedAt, new Date(1_000_000).toISOString());
 });
 
-test("a new but unverified tunnel transitions from connecting to retrying", async () => {
+test("a new tunnel without a TCP listener transitions from connecting to retrying", async () => {
   const closedServer = http.createServer();
   await new Promise((resolve, reject) => {
     closedServer.once("error", reject);
@@ -54,6 +63,87 @@ test("a new but unverified tunnel transitions from connecting to retrying", asyn
   const second = await enrichTunnelProcess(definition, runningProcess(), { now: 2_006_000 });
   assert.equal(second.status, "retrying");
   assert.ok(second.nextRetryAt);
+});
+
+test("HTTP 5xx degrades readiness without terminating a live SSH tunnel and later recovers", async (t) => {
+  let ready = false;
+  const listener = netServer();
+  const readiness = http.createServer((_request, response) => {
+    response.writeHead(ready ? 200 : 503);
+    response.end(ready ? "ready" : "upstream unavailable");
+  });
+  await Promise.all([listen(listener), listen(readiness)]);
+  t.after(() => Promise.all([close(listener), close(readiness)]));
+
+  const definition = tunnelDefinition("http-recovers", listener.address().port, {
+    healthUrl: `http://127.0.0.1:${readiness.address().port}/health`
+  });
+  const process = runningProcess();
+  resetTunnelRuntime(definition.id);
+  for (const now of [3_000_000, 3_003_000, 3_006_000]) {
+    const degraded = await enrichTunnelProcess(definition, process, { now });
+    assert.equal(degraded.status, "connected");
+    assert.equal(degraded.active, true);
+    assert.equal(degraded.pid, process.pid);
+    assert.equal(degraded.restarts, process.restarts);
+    assert.equal(degraded.healthCheck.ok, true);
+    assert.equal(degraded.healthCheck.target, `tcp://127.0.0.1:${listener.address().port}`);
+    assert.equal(degraded.readinessCheck.statusCode, 503);
+    assert.equal(degraded.readinessCheck.ok, false);
+    assert.equal(degraded.health, "degraded");
+    assert.equal(degraded.fullyAvailable, false);
+  }
+
+  ready = true;
+  const recovered = await enrichTunnelProcess(definition, process, { now: 3_009_000 });
+  assert.equal(recovered.status, "connected");
+  assert.equal(recovered.pid, process.pid);
+  assert.equal(recovered.restarts, process.restarts);
+  assert.equal(recovered.readinessCheck.statusCode, 200);
+  assert.equal(recovered.health, "healthy");
+  assert.equal(recovered.fullyAvailable, true);
+});
+
+test("HTTP readiness timeouts do not consume SSH restart attempts", async (t) => {
+  const listener = netServer();
+  const readiness = http.createServer((_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200);
+      response.end("late");
+    }, 200);
+  });
+  await Promise.all([listen(listener), listen(readiness)]);
+  t.after(() => Promise.all([close(listener), close(readiness)]));
+
+  const definition = tunnelDefinition("slow-readiness", listener.address().port, {
+    healthUrl: `http://127.0.0.1:${readiness.address().port}/`
+  });
+  const process = { ...runningProcess(), restarts: 0 };
+  const result = await enrichTunnelProcess(definition, process, {
+    now: Date.now(),
+    httpProbeTimeoutMs: 40
+  });
+  assert.equal(result.status, "connected");
+  assert.equal(result.active, true);
+  assert.equal(result.pid, process.pid);
+  assert.equal(result.restarts, process.restarts);
+  assert.equal(result.retryCount, 0);
+  assert.equal(result.healthCheck.ok, true);
+  assert.equal(result.readinessCheck.ok, false);
+  assert.match(result.readinessCheck.error, /超时/);
+});
+
+test("a tunnel without healthUrl keeps its TCP-only behavior", async (t) => {
+  const listener = netServer();
+  await listen(listener);
+  t.after(() => close(listener));
+  const definition = tunnelDefinition("tcp-only", listener.address().port, { healthUrl: "" });
+  const result = await enrichTunnelProcess(definition, runningProcess(), { now: Date.now() });
+  assert.equal(result.status, "connected");
+  assert.equal(result.healthCheck.ok, true);
+  assert.equal(result.readinessCheck.configured, false);
+  assert.equal(result.readinessCheck.ok, true);
+  assert.equal(result.health, "healthy");
 });
 
 test("a restarting SSH process exposes its latest error and next retry", async () => {
@@ -334,15 +424,20 @@ test("extracts a useful SSH error from process logs", () => {
   );
 });
 
-function tunnelDefinition(id, port) {
+function tunnelDefinition(id, port, overrides = {}) {
   return {
     id,
     name: id,
     kind: "tunnel",
     bindAddress: "127.0.0.1",
     localPort: port,
-    healthUrl: `http://127.0.0.1:${port}/`
+    healthUrl: `http://127.0.0.1:${port}/`,
+    ...overrides
   };
+}
+
+function netServer() {
+  return net.createServer();
 }
 
 function runningProcess() {

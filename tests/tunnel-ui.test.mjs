@@ -53,6 +53,19 @@ test("a tunnel without a domain entry only requires its SSH health check", () =>
   assert.equal(isDomainOnlyFailure(process), false);
 });
 
+test("HTTP application readiness can be degraded while the SSH tunnel stays connected", () => {
+  const process = connectedTunnel({
+    readinessCheck: {
+      configured: true,
+      ok: false,
+      statusCode: 503,
+      error: "HTTP 503 Service Unavailable"
+    }
+  });
+  assert.equal(tunnelDisplayState(process), "connected");
+  assert.equal(tunnelFailureMessage(process), "");
+});
+
 test("an active retry and a locally pending action remain connecting and clear errors", () => {
   const retrying = {
     status: "retrying",

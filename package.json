@@ -21,7 +21,7 @@
     "start": "node src/server.mjs",
     "render": "node scripts/render-config.mjs",
     "generate:icons": "node scripts/generate-icon-library.mjs",
-    "check": "node --check public/app.js && node --check public/i18n.js && node --check public/tunnel-ui.js && node --check scripts/run-managed-tunnel.mjs && node --check scripts/tunnel-http-health.mjs && node --check src/config.mjs && node --check src/keychain.mjs && node --check src/tunnel-health.mjs && node --check src/tunnel-network.mjs && node --check src/server.mjs && node --check desktop/main.cjs && node --check desktop/startup-mode.cjs && node --check desktop/window-lifecycle.cjs && node --check desktop/preload.cjs && node --check desktop/shell-localize.js && node --check desktop/tray.js",
+    "check": "node --check public/app.js && node --check public/i18n.js && node --check public/tunnel-ui.js && node --check scripts/run-managed-tunnel.mjs && node --check scripts/tunnel-http-health.mjs && node --check src/config.mjs && node --check src/keychain.mjs && node --check src/process-lifecycle.mjs && node --check src/service-health.mjs && node --check src/tunnel-health.mjs && node --check src/tunnel-network.mjs && node --check src/server.mjs && node --check desktop/main.cjs && node --check desktop/startup-mode.cjs && node --check desktop/window-lifecycle.cjs && node --check desktop/preload.cjs && node --check desktop/shell-localize.js && node --check desktop/tray.js",
     "test": "node --test tests/*.test.mjs",
     "test:smoke": "node tests/smoke.mjs",
     "build:keychain": "zsh scripts/build-keychain-helper.zsh",
