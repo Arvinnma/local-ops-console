@@ -133,14 +133,19 @@ Configure a local HTTP URL that is reachable through the tunnel, for example:
 http://127.0.0.1:18080/
 ```
 
-A listening local port does not prove the remote application is usable. Local Ops reports **Connected** only after this URL returns a valid HTTP response from 100 through 499. A 500 response, connection failure, or ten-second timeout fails the check; repeated failures terminate the current SSH process and trigger automatic retry.
+A listening local port proves only that the managed SSH forward exists; it does not prove that the remote HTTP application is ready. Local Ops therefore treats these as separate signals:
+
+- **SSH/TCP liveness** checks the managed SSH process and loopback listener. Losing this layer drives SSH restart behavior.
+- **Application readiness** optionally requests the configured local HTTP URL. HTTP `100–499` is ready; `5xx`, connection failure, or a ten-second timeout is degraded.
+
+Application-readiness failures never terminate a still-live SSH process, never consume its Process Compose restart budget, and continue to be checked until the application recovers.
 
 - **Connecting**: includes waiting for network, establishing SSH, automatic retries, and a manual immediate retry. The primary button is disabled and stale error text is hidden.
 - **Connection Failed**: all 40 startup-restoration retries or all 3 manual retries ended without passing verification. The card shows the specific error and enables a yellow **Retry Now** button. Clicking it is a manual action and begins a new three-retry budget.
-- **Connected**: the real HTTP path is healthy; when a matching domain entry is configured, that entry must also be ready.
+- **Connected**: the SSH/TCP tunnel is live. The separate Tunnel Health Check can still report **Not Ready** when an optional HTTP application check is degraded. When a matching domain entry is configured, that entry must also be ready before the card reaches its fully available state.
 - **Stopped**: the tunnel is disabled; its SSH process and local listener should be absent.
 
-Tunnel cards retain only four diagnostics: SSH Host Network, SSH Tunnel, Tunnel Health Check, and Domain Entry. Error text appears at the bottom only in **Connection Failed**; long errors scroll and remain available in a tooltip. Leaving the health URL blank falls back to a local TCP listener check, which cannot prove the remote target is reachable.
+Tunnel cards retain only four diagnostics: SSH Host Network, SSH Tunnel, Tunnel Health Check, and Domain Entry. Error text appears at the bottom only in **Connection Failed**; long errors scroll and remain available in a tooltip. Leaving the health URL blank intentionally provides TCP-only liveness and leaves remote application readiness unknown.
 
 If a Reverse Proxy target matches the tunnel's local listener, Local Ops automatically treats that route as the tunnel's complete domain entry and probes its actual URL, including the configured path. Entry checks accept `2xx`, `3xx`, `401`, and `403`. An authentication-protected service commonly returns `401 Unauthorized` or `403 Forbidden` before login; this proves that the route reached the application, not that user authentication succeeded. A wrong path returning `404`, a `5xx` response, a connection failure, or a ten-second timeout reports **Domain Entry: Not Ready** without restarting an otherwise healthy SSH tunnel. The UI distinguishes:
 
@@ -151,7 +156,17 @@ The card reports **Connected** only when every configured layer above passes. If
 
 The entry comes from the existing reverse-proxy configuration. It is never hard-coded for one project and does not add a duplicate field to the SSH tunnel form.
 
-Domain-entry failures follow the active 3- or 40-retry budget. Exhausting that budget reports **Connection Failed**, but it no longer permanently locks the card: Local Ops performs one low-frequency recovery probe every 30 seconds. When the domain entry responds again, the same healthy SSH process automatically returns to **Connected**. UI refreshes inside that interval reuse the recorded result instead of hammering a busy service.
+Domain-entry failures follow the active 3- or 40-probe presentation budget, but they do not consume Process Compose restart attempts or terminate the SSH process. Exhausting that budget reports **Connection Failed**, but it no longer permanently locks the card: Local Ops performs one low-frequency recovery probe every 30 seconds. When the domain entry responds again, the same healthy SSH process automatically returns to **Connected**. UI refreshes inside that interval reuse the recorded result instead of hammering a busy service.
+
+### Desired state and stop audit
+
+Local Ops records the desired state for managed services and tunnels separately from the process snapshot returned by Process Compose. This prevents a short orchestrator restart window from removing an expected-running resource from the remembered session. Start, stop, and restart requests retain their source, reason, and timestamp in:
+
+```text
+~/.local/share/local-ops/runtime/process-lifecycle.json
+```
+
+The source distinguishes web UI, API, menu bar, app startup, app quit, health logic, and orchestrator observations. An explicit stop changes desired state to stopped; a transient observed stop does not silently erase a previous running intent.
 
 ### Encrypted private keys and Keychain
 

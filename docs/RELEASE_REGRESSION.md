@@ -32,6 +32,8 @@ npm run check
 npm test
 node --test \
   tests/config.test.mjs \
+  tests/process-lifecycle.test.mjs \
+  tests/service-health.test.mjs \
   tests/tunnel-network.test.mjs \
   tests/tunnel-http-health.test.mjs \
   tests/tunnel-health.test.mjs \
@@ -68,31 +70,46 @@ Verify:
 9. Only one SSH process owns the configured local listener.
 10. Stopping the tunnel removes both the SSH process and listener.
 
-## 4. HTTP readiness matrix
+## 4. Liveness and HTTP readiness matrix
 
-Tunnel health and complete domain-entry readiness intentionally use different status policies:
+SSH liveness, forwarded-application readiness, and complete domain-entry readiness intentionally use different policies:
 
-| Probe | Ready responses | Not ready | Timeout |
+| Probe | Healthy / ready | Unhealthy / not ready | Lifecycle effect |
 | --- | --- | --- | --- |
-| Tunnel HTTP health URL | HTTP `100–499` | `5xx`, connection/DNS failure | 10 seconds |
-| Complete `.localhost` domain entry | `2xx`, `3xx`, `401`, `403` | `404`, other `4xx`, `5xx`, connection/DNS failure | 10 seconds |
+| SSH/TCP liveness | Managed SSH process and local listener exist | Process exited or listener unavailable | May drive SSH retry |
+| Optional tunnel application readiness | HTTP `100–499` within 10 seconds | `5xx`, connection/DNS failure, timeout | Degraded only; never kills SSH |
+| Complete `.localhost` domain entry | `2xx`, `3xx`, `401`, `403` within 10 seconds | `404`, other `4xx`, `5xx`, connection/DNS failure, timeout | Presentation/recovery probes only; never kills SSH |
 
 Important interpretation:
 
 - `401 Unauthorized` and `403 Forbidden` are successful **readiness** results only for the complete domain entry. They prove that Caddy, the SSH forward, and the authentication-protected service answered.
 - They do not prove that credentials are valid or that the user can complete a login.
 - `404` remains a failure because it commonly indicates an incorrect protected entry path.
-- A local TCP listener alone is insufficient evidence that the remote application is usable.
+- A local TCP listener proves tunnel liveness, not remote application readiness.
+- Neither HTTP readiness layer may consume Process Compose restart attempts or terminate an otherwise live SSH process.
 
 Regression cases:
 
-1. Delay protected responses for more than two seconds but less than ten seconds; `401` and `403` must still become ready.
-2. Fail a domain entry until its retry budget is exhausted; it may show the terminal failure between probes.
-3. Restore the entry and wait for the 30-second recovery interval; the same running SSH process must return to **Connected**.
-4. Confirm that repeated UI refreshes inside the interval do not create high-frequency HTTP probes.
-5. Confirm that a domain-only failure does not restart a healthy SSH process.
+1. Return repeated `503` responses and timeouts from the optional application readiness URL; the SSH PID, listener, and Process Compose restart count must remain unchanged.
+2. Restore the application response to `200`; readiness must recover automatically without restarting SSH.
+3. Delay protected domain responses for more than two seconds but less than ten seconds; `401` and `403` must still become ready.
+4. Fail a domain entry until its presentation retry budget is exhausted; it may show the terminal failure between probes.
+5. Restore the entry and wait for the 30-second recovery interval; the same running SSH process must return to **Connected**.
+6. Confirm that repeated UI refreshes inside the interval do not create high-frequency HTTP probes.
+7. Confirm that a domain-only failure does not restart a healthy SSH process.
 
-## 5. Package and installed-runtime verification
+## 5. Desired-state, stop-audit, and service-degradation regression
+
+Use an isolated runtime directory. Do not stop production resources for this gate.
+
+1. Start a managed service and tunnel, then capture a session while Process Compose temporarily reports them stopped. Their desired-running IDs must remain remembered.
+2. Stop one resource through the web UI and one through the HTTP API. Inspect `runtime/process-lifecycle.json` and confirm `requestedBy`, `reason`, and ISO timestamp are preserved.
+3. Restart a tunnel and confirm the runner's stopped state carries `restart_requested` rather than an empty reason.
+4. Return `503` or a timeout from a managed service's health URL. Its process PID and restart count must remain unchanged while the UI reports **Service Degraded**.
+5. Restore the health endpoint to `200`; the same service process must recover to healthy.
+6. Generate worker YAML and confirm user services and tunnels contain no `readiness_probe` or `liveness_probe`.
+
+## 6. Package and installed-runtime verification
 
 Build without installing:
 
@@ -125,7 +142,7 @@ shasum -a 256 \
 
 Before an upgrade, record all managed SSH PIDs and listeners. Current backend replacement restarts the control plane and may restart Process Compose worker SSH processes; schedule the operation after active transfers finish and report every PID change.
 
-## 6. Runtime acceptance
+## 7. Runtime acceptance
 
 For each representative tunnel, capture:
 
@@ -135,6 +152,7 @@ For each representative tunnel, capture:
 - tunnel health status and response code;
 - complete domain-entry readiness and response code;
 - empty error text after recovery.
+- lifecycle desired state and latest audited stop source when applicable.
 
 Include at least:
 
@@ -145,7 +163,7 @@ Include at least:
 
 The release passes only when the API/UI state agrees with real listeners and HTTP responses.
 
-## 7. Documentation and publication
+## 8. Documentation and publication
 
 Before committing:
 

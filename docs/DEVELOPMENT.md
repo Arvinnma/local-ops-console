@@ -133,7 +133,7 @@ To build, replace the app in Applications, re-sign ad hoc, verify the signature,
 
 ## Release gate
 
-The command-by-command gate, cold-start matrix, `401/403` readiness semantics, installation checks, and result template live in [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md). The summary below does not replace that checklist.
+The command-by-command gate, cold-start matrix, SSH/TCP liveness versus HTTP readiness semantics, desired-state/stop-audit checks, `401/403` domain-entry handling, installation checks, and result template live in [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md). The summary below does not replace that checklist.
 
 1. Establish and record the intended public and private baselines in [Authoritative Project Status](PROJECT_STATUS.md).
 2. Update root/desktop versions, lockfiles, cache query strings, changelog, issue template, READMEs, user guides, and release notes.

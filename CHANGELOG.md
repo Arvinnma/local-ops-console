@@ -9,6 +9,10 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 - Increase tunnel and complete-domain HTTP readiness timeouts from two to ten seconds so busy forwarded services do not produce false failures.
 - Treat complete-domain `401` and `403` responses as reachable authentication boundaries while keeping `404`, `5xx`, connection failures, and timeouts unready.
 - Throttle normal domain-entry retries to the existing three-second cadence and let a terminal domain failure probe once every 30 seconds, automatically recovering without restarting a healthy SSH process.
+- Separate SSH/TCP tunnel liveness from optional HTTP application readiness. A slow, unavailable, or `5xx` application now reports degraded readiness without terminating the SSH process or consuming its restart budget.
+- Remove user-service HTTP readiness/liveness probes from generated Process Compose configuration so an unavailable dashboard upstream does not enter an unbounded restart loop.
+- Persist process desired state and auditable start/stop metadata, including the requesting UI, API, menu-bar, startup, or orchestrator source.
+- Preserve desired-running services and tunnels when session capture overlaps a short Process Compose restart window.
 
 ### Documentation
 
