@@ -286,6 +286,7 @@ const ENGLISH = new Map(Object.entries({
   "SSH 主机网络": "SSH Host Network",
   "隧道健康检查": "Tunnel Health Check",
   "可连接": "Reachable",
+  "由 SSH 建立": "Managed by SSH",
   "尚未验证": "Not Yet Verified",
   "已就绪": "Ready",
   "未就绪": "Not Ready",

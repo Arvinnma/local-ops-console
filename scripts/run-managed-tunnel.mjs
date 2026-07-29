@@ -4,6 +4,8 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 
 import {
+  delegatedSshNetworkCheck,
+  isSshManagedConnection,
   NETWORK_RETRY_INTERVAL_MS,
   probeTcpEndpoint,
   readTunnelNetworkState,
@@ -33,6 +35,24 @@ async function waitForNetworkAndRun() {
     port: options.port,
     sshBinary: options.sshBinary
   });
+  if (isSshManagedConnection(endpoint)) {
+    const delegatedCheck = delegatedSshNetworkCheck(
+      endpoint,
+      options.host
+    );
+    networkAttempts = 1;
+    updateState("connecting", {
+      endpoint,
+      networkAttempts,
+      networkCheck: delegatedCheck,
+      reachableAt: null,
+      nextCheckAt: null,
+      error: ""
+    });
+    process.stdout.write(`[Local Ops] SSH 网络由 OpenSSH 代理配置建立：${options.host}\n`);
+    return runSshCommand(endpoint, delegatedCheck);
+  }
+
   const probe = await probeTcpEndpoint(endpoint.host, endpoint.port);
   networkAttempts = 1;
   if (probe.ok) {

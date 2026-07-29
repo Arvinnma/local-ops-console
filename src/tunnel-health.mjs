@@ -391,15 +391,21 @@ function readinessCheckDescriptor(definition) {
 function networkCheckDescriptor(definition, state) {
   const endpoint = state?.endpoint || {};
   const check = state?.networkCheck || {};
+  const delegated = Boolean(check.delegated || check.mode === "ssh-managed");
   return {
-    mode: "ssh-host-tcp",
-    target: endpoint.host
-      ? `${endpoint.host}:${endpoint.port || definition.sshPort || 22}`
-      : `${definition.sshHost}:${definition.sshPort || 22}`,
+    mode: delegated ? "ssh-managed" : "ssh-host-tcp",
+    delegated,
+    proxyJump: check.proxyJump || endpoint.proxyJump || "",
+    proxyCommand: check.proxyCommand || endpoint.proxyCommand || "",
+    target: delegated
+      ? (check.target || definition.sshHost)
+      : endpoint.host
+        ? `${endpoint.host}:${endpoint.port || definition.sshPort || 22}`
+        : `${definition.sshHost}:${definition.sshPort || 22}`,
     configuredTarget: `${definition.sshHost}:${definition.sshPort || 22}`,
     resolvedHost: endpoint.host || "",
     resolvedPort: Number(endpoint.port || definition.sshPort || 22),
-    ok: state?.phase === "waiting_network" ? false : Boolean(check.ok),
+    ok: state?.phase === "waiting_network" ? false : delegated ? null : Boolean(check.ok),
     checkedAt: check.checkedAt || null,
     latencyMs: check.latencyMs ?? null,
     attempts: Number(state?.networkAttempts || 0),

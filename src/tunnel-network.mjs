@@ -55,6 +55,24 @@ export function parseSshConfiguration(output, fallback = {}) {
   };
 }
 
+export function isSshManagedConnection(endpoint) {
+  return Boolean(endpoint?.proxyJump || endpoint?.proxyCommand);
+}
+
+export function delegatedSshNetworkCheck(endpoint, target, checkedAt = new Date().toISOString()) {
+  return {
+    mode: "ssh-managed",
+    delegated: true,
+    proxyJump: String(endpoint?.proxyJump || ""),
+    proxyCommand: String(endpoint?.proxyCommand || ""),
+    target: String(target || endpoint?.configuredHost || endpoint?.host || ""),
+    checkedAt,
+    ok: null,
+    latencyMs: null,
+    error: ""
+  };
+}
+
 export function probeTcpEndpoint(host, port, timeoutMs = NETWORK_PROBE_TIMEOUT_MS) {
   const started = performance.now();
   return new Promise((resolve) => {

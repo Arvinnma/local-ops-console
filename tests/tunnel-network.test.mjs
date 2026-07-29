@@ -7,7 +7,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parseSshConfiguration } from "../src/tunnel-network.mjs";
+import {
+  delegatedSshNetworkCheck,
+  isSshManagedConnection,
+  parseSshConfiguration
+} from "../src/tunnel-network.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RUNNER = path.join(ROOT, "scripts", "run-managed-tunnel.mjs");
@@ -22,6 +26,75 @@ test("parses the effective HostName and port from ssh -G output", () => {
   assert.equal(endpoint.host, "81.70.228.59");
   assert.equal(endpoint.port, 2202);
   assert.equal(endpoint.proxyJump, "");
+});
+
+test("marks ProxyJump and ProxyCommand connections as managed by OpenSSH", () => {
+  const jumpEndpoint = parseSshConfiguration([
+    "hostname 127.0.0.1",
+    "port 10022",
+    "proxyjump frp-relay-01"
+  ].join("\n"), { host: "office-server-01", port: 10022 });
+  assert.equal(isSshManagedConnection(jumpEndpoint), true);
+  assert.deepEqual(
+    delegatedSshNetworkCheck(jumpEndpoint, "office-server-01", "2026-07-29T00:00:00.000Z"),
+    {
+      mode: "ssh-managed",
+      delegated: true,
+      proxyJump: "frp-relay-01",
+      proxyCommand: "",
+      target: "office-server-01",
+      checkedAt: "2026-07-29T00:00:00.000Z",
+      ok: null,
+      latencyMs: null,
+      error: ""
+    }
+  );
+
+  const commandEndpoint = parseSshConfiguration([
+    "hostname internal.example",
+    "port 22",
+    "proxycommand ssh gateway -W %h:%p"
+  ].join("\n"), { host: "internal", port: 22 });
+  assert.equal(isSshManagedConnection(commandEndpoint), true);
+});
+
+test("managed tunnels delegate ProxyJump reachability to OpenSSH", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "local-ops-proxyjump-"));
+  const stateFile = path.join(directory, "state.json");
+  const sshFixture = path.join(directory, "ssh-fixture");
+  fs.writeFileSync(sshFixture, [
+    "#!/bin/sh",
+    "printf '%s\\n' 'hostname 127.0.0.1' 'port 10022' 'proxyjump frp-relay-01'"
+  ].join("\n"), { mode: 0o700 });
+
+  const runner = spawn(process.execPath, [
+    RUNNER,
+    "--id", "proxyjump-fixture",
+    "--state", stateFile,
+    "--lifecycle", path.join(directory, "lifecycle.json"),
+    "--host", "office-server-01",
+    "--port", "10022",
+    "--retry-limit", "3",
+    "--destination", "fixture@office-server-01",
+    "--ssh-binary", sshFixture,
+    "--working-dir", directory,
+    "--command", "/bin/sleep 30"
+  ], { stdio: ["ignore", "pipe", "pipe"] });
+  t.after(() => {
+    if (runner.exitCode == null) runner.kill("SIGKILL");
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  const connecting = await waitForState(
+    stateFile,
+    (state) => state.phase === "connecting" && state.sshPid,
+    5000
+  );
+  assert.equal(connecting.networkCheck.mode, "ssh-managed");
+  assert.equal(connecting.networkCheck.delegated, true);
+  assert.equal(connecting.networkCheck.ok, null);
+  assert.equal(connecting.networkCheck.proxyJump, "frp-relay-01");
+  assert.notEqual(runner.exitCode, 75);
 });
 
 test("managed tunnels fail fast while the SSH endpoint is unavailable and connect on the next retry", async (t) => {

@@ -585,7 +585,9 @@ function tunnelRuntimeDetails(process, displayState) {
       ? tr("已就绪")
       : tr("未就绪");
   const entryClass = entry.ready ? "runtime-ready" : entry.configured ? "runtime-not-ready" : "runtime-neutral";
-  const networkResult = process.status === "waiting_network"
+  const networkResult = network.delegated || network.mode === "ssh-managed"
+    ? tr("由 SSH 建立")
+    : process.status === "waiting_network"
     ? tr("等待网络")
     : network.ok
       ? `${tr("可连接")}${network.latencyMs == null ? "" : ` · ${network.latencyMs} ms`}`
