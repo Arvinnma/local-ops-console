@@ -42,6 +42,7 @@ Intel (`x64`) packages are not provided in v1.8.2.
 | Docker | Launch Docker Desktop and start, stop, or restart existing containers |
 | Terminal actions | Run saved commands, SSH logins, or SSH forwards in Terminal.app or iTerm2 |
 | Menu bar | Use a compact 330 px panel for first-level controls and quick links |
+| Live synchronization | Keep the main window aligned with resources added or edited by another Local Ops client without reopening the App |
 | Session restore | Optionally restore only resources that were running in the previous app session |
 | Portability | Export and import configuration without Docker state, secrets, tokens, or system authorization |
 | Language | Switch the web UI, desktop menus, shell screens, and menu-bar panel between English and Simplified Chinese |

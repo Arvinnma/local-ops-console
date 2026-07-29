@@ -12,16 +12,16 @@ Status date: **2026-07-29**
 
 | Scope | Version / commit | Meaning |
 | --- | --- | --- |
-| Installed application | `1.8.2` | `/Applications/Local Ops.app`; bundled backend built at `2026-07-25T06:54:19.982Z`, source-equivalent to runtime commit `3d402a9` |
-| Public GitHub `main` runtime baseline | `3d402a99c2e8cfeb6e6b7f86acd9b01af894e91c` | Contains the accepted lifecycle/readiness fix after the 2026-07-25 source publication |
+| Installed application / runtime | `1.8.2` | `/Applications/Local Ops.app` remains the released bundle; the installed runtime overlay contains the verified SSH hotfixes and main-console resource synchronization from `a94e920` |
+| Public GitHub `main` runtime baseline | `a94e920cf6c94630efcd16fe3892b5ac9d0f74bd` | Contains the lifecycle/readiness fixes, SSH proxy-managed aliases, and main-console resource synchronization |
 | Public `v1.8.2` DMG | SHA-256 `89d525ea0a132679373c9ce41fa9bf7fca941788f01b30154a28b8a4dbcd5e30` | Published GitHub Release artifact |
 | Public `v1.8.2` tag | `81a7d9b402733a97f10140c47108177508618f5a` | Immutable released source baseline; older than current `main` |
-| Private Forgejo runtime baseline | `f9c2dfb94a7115263f6619d7f3b2261de1ffb9a7` | Verified post-release hotfix for SSH aliases managed by `ProxyJump` / `ProxyCommand` |
+| Private Forgejo runtime baseline | `a94e920cf6c94630efcd16fe3892b5ac9d0f74bd` | Matches the verified public runtime source, including the console resource-synchronization fix |
 | Verified internal DMG | SHA-256 `93c880b17ae4abad58635734a2580b91077d9774e8e692bfd02bfc953c2a63eb` | Internal `Local-Ops-1.8.2-arm64.dmg`; installed and runtime-accepted locally |
 
-Documentation-only commits may advance either `main`; `3d402a9` remains the latest public runtime-affecting baseline, while `f9c2dfb` is the latest privately verified and installed runtime hotfix.
+Documentation-only commits may advance either `main`; `a94e920` remains the latest runtime-affecting baseline for both repositories.
 
-There is no uncommitted ProxyJump patch and no pending “move the patch into source” step. The hotfix is committed in the canonical source, installed as a minimal runtime overlay, and runtime-verified. It is private-only: GitHub `main`, the published `v1.8.2` tag, the Release DMG, and the previously verified internal DMG must not be described as containing it.
+There is no uncommitted ProxyJump or resource-synchronization patch. Both fixes are committed in the canonical source and installed as minimal runtime overlays. GitHub and Forgejo `main` contain them; the published `v1.8.2` tag, Release DMG, and previously verified internal DMG remain older and must not be described as containing either post-release fix.
 
 ### Verified cold-start and SSH-readiness behavior
 
@@ -42,10 +42,12 @@ There is no uncommitted ProxyJump patch and no pending “move the patch into so
 
 The installed build was verified with private Git HTTP and `git ls-remote`, authentication-protected routes, and degraded-upstream recovery. The 2026-07-29 proxy hotfix was additionally verified with `office-server-01` (`HostName 127.0.0.1`, port `10022`, `ProxyJump frp-relay-01`): Open WebUI and Grafana tunnels both reached **Connected**, TCP/HTTP/domain checks passed, and `fullyAvailable` became true. Every pre-existing tunnel retained the same PID and restart count.
 
+The main-console synchronization fix was runtime-verified against nine configured tunnels. The menu-bar panel and `/api/bootstrap` already exposed all nine; after the frontend overlay and a window-only reload, the main console loaded the same catalog while every running SSH tunnel retained its existing PID. Normal polling now refreshes both `/api/state` and `/api/bootstrap`, so resources created by another Local Ops client appear without reopening the App.
+
 ### Current limitations and follow-up
 
 - The accepted post-release source still reports application version `1.8.2`. The next public distribution must bump the version and publish a new tag/DMG instead of silently replacing the existing `v1.8.2` artifact.
-- The ProxyJump hotfix is installed as a backend overlay; the current App bundle and DMGs do not contain it. A full reinstall from an older bundle can revert the runtime until a new package is built.
+- The ProxyJump and resource-synchronization fixes are installed as runtime overlays; the current App bundle and DMGs do not contain them. A full reinstall from an older bundle can revert the runtime until a new package is built.
 - Replacing the bundled backend currently restarts the Local Ops control plane. During the verified private installation this also restarted Process Compose worker SSH processes once. Schedule upgrades after active transfers complete until backend upgrades can preserve worker processes.
 - Distribution remains Apple Silicon only, ad-hoc signed, and not notarized.
 - A terminal domain-entry probe runs every 30 seconds until recovery. This is intentionally low frequency, but it still sends a real HTTP request to the configured local entry.
@@ -58,16 +60,16 @@ Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandat
 
 | 范围 | 版本 / 提交 | 含义 |
 | --- | --- | --- |
-| 当前安装 App | `1.8.2` | `/Applications/Local Ops.app`；内置后台构建时间为 `2026-07-25T06:54:19.982Z`，源码内容等价于运行代码提交 `3d402a9` |
-| 公开 GitHub `main` 运行代码基线 | `3d402a99c2e8cfeb6e6b7f86acd9b01af894e91c` | 2026-07-25 源码发布后包含已验收的生命周期/readiness 修复 |
+| 当前安装 App / 运行副本 | `1.8.2` | `/Applications/Local Ops.app` 仍为已发布 Bundle；安装运行副本已覆盖 `a94e920` 中经过验收的 SSH 热修和主控制台资源同步 |
+| 公开 GitHub `main` 运行代码基线 | `a94e920cf6c94630efcd16fe3892b5ac9d0f74bd` | 包含生命周期/readiness、SSH 代理别名和主控制台资源同步修复 |
 | 公开 `v1.8.2` DMG | SHA-256 `89d525ea0a132679373c9ce41fa9bf7fca941788f01b30154a28b8a4dbcd5e30` | GitHub Release 已发布制品 |
 | 公开 `v1.8.2` 标签 | `81a7d9b402733a97f10140c47108177508618f5a` | 不可变的已发布源码基线，早于当前 `main` |
-| 私有 Forgejo 运行代码基线 | `f9c2dfb94a7115263f6619d7f3b2261de1ffb9a7` | 已验收的发布后热修，支持由 `ProxyJump` / `ProxyCommand` 管理的 SSH 别名 |
+| 私有 Forgejo 运行代码基线 | `a94e920cf6c94630efcd16fe3892b5ac9d0f74bd` | 与公开运行源码一致，包含已验收的主控制台资源同步修复 |
 | 已验证内部 DMG | SHA-256 `93c880b17ae4abad58635734a2580b91077d9774e8e692bfd02bfc953c2a63eb` | 内部 `Local-Ops-1.8.2-arm64.dmg`，已在本机安装并通过运行验收 |
 
-后续纯文档提交可能继续推进任一 `main`；`3d402a9` 仍是最新公开运行代码基线，`f9c2dfb` 是最新经过私有验收并安装的运行热修。
+后续纯文档提交可能继续推进任一 `main`；`a94e920` 仍是两个仓库最新的运行代码基线。
 
-目前不存在“ProxyJump 补丁尚未提交”或“还要把热修搬回正式源码”的步骤。热修已经进入正式源码，以最小运行覆盖方式安装并通过运行验收；它目前仅属于私有基线。公开 GitHub `main`、`v1.8.2` 标签、Release DMG 和此前验证的内部 DMG 都不能描述成已经包含该热修。
+目前不存在尚未提交的 ProxyJump 或资源同步补丁，两项修复都已进入正式源码并以最小运行覆盖方式安装。GitHub 与 Forgejo 的 `main` 都包含这些修复；公开 `v1.8.2` 标签、Release DMG 和此前验证的内部 DMG 仍然较旧，不能描述成已经包含发布后的修复。
 
 ### 已验证的冷启动与 SSH readiness 行为
 
@@ -88,10 +90,12 @@ Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandat
 
 当前安装副本已完成私有 Git HTTP 与 `git ls-remote`、认证型入口和降级恢复验收。2026-07-29 又以 `office-server-01`（`HostName 127.0.0.1`、端口 `10022`、`ProxyJump frp-relay-01`）验证了代理热修：Open WebUI 与 Grafana 隧道均进入“已连接”，TCP、HTTP、域名检查通过，`fullyAvailable=true`；全部既有隧道的 PID 与重启次数保持不变。
 
+主控制台资源同步修复已用 9 条现有隧道完成运行验收：菜单栏面板和 `/api/bootstrap` 原本都能读取 9 条；覆盖前端并只重新载入窗口后，主控制台显示相同资源目录，所有运行中的 SSH 隧道 PID 均未变化。普通轮询现在会同时刷新 `/api/state` 与 `/api/bootstrap`，其他 Local Ops 客户端新增资源后无需重新打开 App。
+
 ### 尚未解决与后续事项
 
 - 已验收的发布后源码仍显示 App 版本 `1.8.2`。下一次公开发布必须升级版本号、创建新标签和 DMG；不得静默替换既有公开 `v1.8.2` 制品。
-- ProxyJump 热修目前以后台覆盖方式安装，当前 App Bundle 和 DMG 都不包含它；在新制品产生前，从旧 Bundle 完整重装可能回退该运行代码。
+- ProxyJump 和资源同步修复目前以运行覆盖方式安装，当前 App Bundle 和 DMG 都不包含它们；在新制品产生前，从旧 Bundle 完整重装可能回退运行代码。
 - 当前替换内置后台会重启 Local Ops 控制面。私有制品安装验收时，Process Compose Worker 下的 SSH 进程也随之重启过一次。在升级流程能够保留 Worker 前，应避开正在进行的数据传输。
 - 当前只提供 Apple Silicon 包，使用 ad-hoc 签名，尚未公证。
 - 终态恢复期间每 30 秒会向配置的本地域名入口发送一次真实 HTTP 请求；频率已刻意降低，但并非零流量。
