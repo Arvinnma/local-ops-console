@@ -6,6 +6,7 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ### Fixed
 
+- Keep the main console catalog synchronized with `/api/bootstrap` during normal refreshes, so tunnels, services, routes, terminal actions, and settings added by another client appear without reopening the App.
 - Increase tunnel and complete-domain HTTP readiness timeouts from two to ten seconds so busy forwarded services do not produce false failures.
 - Treat complete-domain `401` and `403` responses as reachable authentication boundaries while keeping `404`, `5xx`, connection failures, and timeouts unready.
 - Throttle normal domain-entry retries to the existing three-second cadence and let a terminal domain failure probe once every 30 seconds, automatically recovering without restarting a healthy SSH process.
@@ -16,6 +17,7 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ### Documentation
 
+- Document cross-client resource synchronization and add it to the release regression checklist.
 - Add an authoritative public/private baseline record and a repeatable release/hotfix regression manual.
 - Document the current backend-upgrade worker restart caveat and the distinction between readiness success and successful user authentication.
 

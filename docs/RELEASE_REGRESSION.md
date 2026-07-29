@@ -53,6 +53,15 @@ npm run test:browser
 
 The smoke and browser gates can mutate temporary Local Ops resources. Do not run them against irreplaceable user data without first reviewing their temporary IDs and cleanup behavior. Docker mutation coverage remains opt-in.
 
+Resource synchronization regression:
+
+1. Open the main console and record the visible service, tunnel, route, and terminal-action IDs.
+2. Add one temporary resource through the HTTP API after the page has completed its initial bootstrap.
+3. Wait for one normal UI polling interval without reopening the window.
+4. Confirm that the new resource appears in the correct page and that the existing runtime state remains unchanged.
+5. Repeat with a route or terminal action, then delete every temporary resource.
+6. Confirm that changing only bootstrap metadata such as the CSRF token does not trigger a catalog rerender.
+
 ## 3. Cold-start and network-readiness regression
 
 Use a disposable tunnel or isolated catalog. Do not disconnect a production transfer merely to exercise this gate.

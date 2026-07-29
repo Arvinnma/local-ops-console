@@ -61,6 +61,8 @@ Services, tunnels, terminal actions, and containers use an aligned trailing stat
 
 Selecting a service, tunnel, or container toggles it. Selecting a terminal action runs it. Selecting a route opens it in the default browser. The fixed footer contains Refresh, Show Console, Open in Browser, Open Logs, and Quit App. The panel refreshes every 10 seconds and immediately after actions.
 
+The main console refreshes both runtime state and the current resource catalog. Resources created or edited through the Local Ops HTTP API, the menu-bar process, or another open client therefore appear in the App without restarting or reopening the window. This synchronization covers services, SSH tunnels, monitored services, reverse-proxy routes, terminal actions, and settings.
+
 ## 5. Managed services
 
 Open **Services → Add Resource → Node / Command Service**.

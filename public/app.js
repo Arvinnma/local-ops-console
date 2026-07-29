@@ -5,6 +5,7 @@ import {
   tunnelFailureMessage,
   tunnelPrimaryAction
 } from "./tunnel-ui.js?v=1.8.2";
+import { bootstrapConfigChanged } from "./resource-sync.js?v=1.8.2";
 
 const LANGUAGE_STORAGE_KEY = "local-ops-language";
 setLocale(normalizeLocale(localStorage.getItem(LANGUAGE_STORAGE_KEY)));
@@ -254,11 +255,21 @@ function navigate(view, updateHash = true) {
 async function refresh(force = false) {
   if (ui.busy && !force) return;
   try {
-    const tasks = [request(`/api/state${force ? "?fresh=1" : ""}`)];
+    const tasks = [
+      request(`/api/state${force ? "?fresh=1" : ""}`),
+      request("/api/bootstrap")
+    ];
     if (ui.activeView === "docker") tasks.push(request(`/api/docker${force ? "?fresh=1" : ""}`));
-    const [state, docker] = await Promise.all(tasks);
+    const [state, bootstrap, docker] = await Promise.all(tasks);
+    const configChanged = bootstrapConfigChanged(ui.bootstrap, bootstrap);
+    ui.bootstrap = bootstrap;
     ui.state = state;
     if (docker) ui.docker = docker;
+    if (configChanged) {
+      applyLanguage(bootstrap.config.settings.language);
+      renderSettings();
+      renderTerminalTable();
+    }
     setConnection(state.orchestrator.online);
     renderState();
     if (docker) renderDocker();
