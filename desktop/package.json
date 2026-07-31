@@ -1,6 +1,6 @@
 {
   "name": "local-ops-desktop",
-  "version": "1.8.2",
+  "version": "1.8.3",
   "description": "Native macOS shell for the Local Ops control plane",
   "private": true,
   "main": "main.cjs",
@@ -55,7 +55,7 @@
     },
     "afterPack": "scripts/after-pack.cjs",
     "mac": {
-      "bundleVersion": "1.8.2",
+      "bundleVersion": "1.8.3",
       "target": [
         {
           "target": "dmg",

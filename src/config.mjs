@@ -13,6 +13,7 @@ export const WORKER_COMPOSE_PATH = path.join(ROOT, "generated", "services.yaml")
 export const CADDYFILE_PATH = path.join(ROOT, "generated", "Caddyfile");
 export const RUNTIME_DIR = path.join(ROOT, "runtime");
 export const TUNNEL_STATE_DIR = path.join(RUNTIME_DIR, "tunnels");
+export const SERVICE_STATE_DIR = path.join(RUNTIME_DIR, "services");
 export const PROCESS_LIFECYCLE_PATH = path.join(RUNTIME_DIR, "process-lifecycle.json");
 
 export const BINARIES = {
@@ -550,7 +551,7 @@ export function renderWorkerCompose(catalog, options = {}) {
 
   for (const service of catalog.services) {
     appendProcess(lines, service.id, {
-      command: service.command,
+      command: service.healthUrl ? managedServiceCommand(service) : service.command,
       workingDir: service.workingDir,
       namespace: service.namespace || "services",
       description: service.description || service.name,
@@ -590,6 +591,19 @@ export function renderWorkerCompose(catalog, options = {}) {
     });
   }
   return `${lines.join("\n")}\n`;
+}
+
+function managedServiceCommand(service) {
+  return [
+    "exec",
+    shellQuote(BINARIES.node),
+    shellQuote(path.join(ROOT, "scripts", "run-managed-service.mjs")),
+    "--id", shellQuote(service.id),
+    "--state", shellQuote(path.join(SERVICE_STATE_DIR, `${service.id}.json`)),
+    "--working-dir", shellQuote(service.workingDir),
+    ...(service.healthUrl ? ["--health-url", shellQuote(service.healthUrl)] : []),
+    "--command", shellQuote(service.command)
+  ].join(" ");
 }
 
 function configuredTunnelRetryLimit(options, id) {

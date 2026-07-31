@@ -60,6 +60,23 @@ test("services without healthUrl are unchanged", async () => {
   assert.equal(await enrichServiceProcess({ id: "plain-service" }, process), process);
 });
 
+test("a managed port conflict stays active but degraded", async () => {
+  const process = await enrichServiceProcess({
+    id: "dashboard",
+    healthUrl: "http://127.0.0.1:9119/"
+  }, {
+    ...runningProcess(),
+    managedService: {
+      phase: "port_conflict",
+      error: "Local port 127.0.0.1:9119 is already in use by an unmanaged process"
+    }
+  });
+  assert.equal(process.active, true);
+  assert.equal(process.health, "degraded");
+  assert.equal(process.serviceReady, false);
+  assert.match(process.healthCheck.error, /9119/);
+});
+
 function runningProcess() {
   return {
     id: "fixture",

@@ -2,13 +2,13 @@
 
 [English](USER_GUIDE.md) · [项目说明](../README.zh-CN.md) · [安全说明](../SECURITY.md)
 
-本文适用于 Local Ops v1.8.2 与 Apple Silicon macOS。
+本文适用于 Local Ops v1.8.3 与 Apple Silicon macOS。
 
 ## 1. 安装、升级与打开方式
 
 ### 安装
 
-1. 从 GitHub Releases 下载 `Local-Ops-1.8.2-arm64.dmg`。
+1. 从 GitHub Releases 下载 `Local-Ops-1.8.3-arm64.dmg`。
 2. 打开 DMG，把 **Local Ops** 拖到“应用程序”。
 3. 从“应用程序”启动 App。
 
@@ -96,6 +96,8 @@
 ```
 
 左侧主按钮用于开启或关闭。编辑、重启、日志和删除等操作放在“更多”菜单中；不支持某项操作的系统资源会直接隐藏对应按钮。拖动“排序”列手柄时，界面会先立即移动，再异步保存顺序。
+
+服务配置了本机 HTTP 健康地址时，Local Ops 会把真实子进程与 Process Compose 的摘要状态分开监督，避免 Dashboard 实际仍存活却被误判为退出并重复启动。端口已由其他进程占用时会显示降级并阻止重复启动，不再无限重试；停止或重启会清理完整的托管进程树。没有健康地址的服务继续使用旧版本的直接生命周期。
 
 ## 6. SSH 隧道
 

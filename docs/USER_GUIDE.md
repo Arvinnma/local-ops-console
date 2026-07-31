@@ -2,13 +2,13 @@
 
 [简体中文](USER_GUIDE.zh-CN.md) · [Project README](../README.md) · [Security](../SECURITY.md)
 
-This guide applies to Local Ops v1.8.2 on Apple Silicon macOS.
+This guide applies to Local Ops v1.8.3 on Apple Silicon macOS.
 
 ## 1. Install, update, and open
 
 ### Install
 
-1. Download `Local-Ops-1.8.2-arm64.dmg` from GitHub Releases.
+1. Download `Local-Ops-1.8.3-arm64.dmg` from GitHub Releases.
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch the app from Applications.
 
@@ -96,6 +96,8 @@ Service port: 3000
 ```
 
 The left primary action starts or stops the service. The overflow menu contains edit, restart, logs, and delete where applicable. System resources hide unsupported controls. Drag the handle in the Order column; the UI updates immediately and saves the order asynchronously.
+
+When a service has a loopback HTTP health URL, Local Ops supervises its real child process separately from Process Compose's summary state. This prevents a surviving dashboard process from being misreported as exited and then duplicated. A port already owned by another process is reported as degraded and blocks a duplicate launch instead of restarting forever. Stop and restart actions terminate the complete managed process tree. Services without a health URL retain the direct lifecycle used in earlier releases.
 
 ## 6. SSH tunnels
 

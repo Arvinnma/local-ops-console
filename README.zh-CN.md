@@ -28,7 +28,7 @@ Local Ops 把 Electron 桌面 App、浏览器控制台、Process Compose 和 Cad
 - Docker 功能可选；使用时需要安装 Docker Desktop
 - 系统自带 Terminal.app；iTerm2 为可选项
 
-v1.8.2 暂不提供 Intel（`x64`）安装包。
+v1.8.3 暂不提供 Intel（`x64`）安装包。
 
 ## 功能一览
 
@@ -49,7 +49,7 @@ v1.8.2 暂不提供 Intel（`x64`）安装包。
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Arvinnma/local-ops-console/releases/latest) 下载 `Local-Ops-1.8.2-arm64.dmg`。
+1. 从 [Releases](https://github.com/Arvinnma/local-ops-console/releases/latest) 下载 `Local-Ops-1.8.3-arm64.dmg`。
 2. 打开 DMG，把 **Local Ops** 拖到“应用程序”。
 3. 从“应用程序”启动 **Local Ops**。
 
@@ -83,6 +83,8 @@ SSH 进程与本地回环监听决定隧道的 SSH/TCP 存活状态；可选的�
 HTTP readiness 探测使用 10 秒超时，避免转发后的繁忙服务仅因超过 2 秒而被误判。完整域名入口除 `2xx/3xx` 外还接受 `401/403`：这两种响应只证明受认证保护的应用已经应答，不代表登录成功。域名入口进入终态后每 30 秒进行一次低频恢复探测，不会永久锁死。
 
 托管进程的期望状态与操作审计会保存在本机运行目录，记录动作、来源、原因和时间。恢复上次会话以期望状态为准，因此即使会话捕获刚好遇到 Process Compose 短暂重启，也不会把用户仍希望运行的服务或隧道误删。
+
+配置了本机 HTTP 健康地址的服务现在会经过 Local Ops 的轻量监督器运行。编排器短暂丢失状态时，监督器会按真实子进程 PID 对账；配置端口已被占用时会阻止重复启动；停止时会清理完整进程树；永久端口冲突只会显示为降级，不再触发无限重启。没有健康地址的服务继续使用原有的 Process Compose 直接生命周期。
 
 字段填写示例、钥匙串行为、开机语义、备份范围、CLI、升级、卸载和排错方法见[完整使用手册](docs/USER_GUIDE.zh-CN.md)。
 
@@ -151,13 +153,13 @@ npm ci
 npm run dmg
 ```
 
-安装包输出到 `desktop/dist/Local-Ops-1.8.2-arm64.dmg`。打包步骤会把当前 Caddy 与 Process Compose 二进制复制进 App。
+安装包输出到 `desktop/dist/Local-Ops-1.8.3-arm64.dmg`。打包步骤会把当前 Caddy 与 Process Compose 二进制复制进 App。
 
 修改打包、原生 Helper、回环监听或 Electron 安全设置前，请先阅读[开发与发布文档](docs/DEVELOPMENT.md)。
 
 ## 发布验收
 
-v1.8.2 发布门禁覆盖：语法和单元测试、中英文静态文案覆盖、配置往返、API 安全校验、服务生命周期与日志、SSH 网络门控与有限重试、完整域名入口检查、Caddy 路径路由、Docker 容器读取、加密私钥钥匙串集成、登录项静默启动、菜单栏重复恢复窗口、窄窗口浏览器 QA、App 签名与架构、挂载 DMG 的布局/签名检查，以及安装到“应用程序”后的启动冒烟测试。
+v1.8.3 发布门禁覆盖：语法和单元测试、中英文静态文案覆盖、配置往返、API 安全校验、真实子进程对账、重复端口保护、进程树清理、服务生命周期与日志、SSH 网络门控与有限重试、完整域名入口检查、Caddy 路径路由、Docker 容器读取、加密私钥钥匙串集成、登录项静默启动、菜单栏重复恢复窗口、窄窗口浏览器 QA、App 签名与架构，以及挂载 DMG 的布局/签名检查。
 
 维护者在对外描述修复前必须先查看[项目权威状态](docs/PROJECT_STATUS.md)：公开 GitHub Release 与私有已验证运行基线可能处于不同提交。可重复执行的验收步骤见[发布与热修回归手册](docs/RELEASE_REGRESSION.md)。
 

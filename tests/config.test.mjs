@@ -122,9 +122,26 @@ test("keeps user-service HTTP health checks out of Process Compose lifecycle pro
   catalog.tunnels = [];
   const compose = renderWorkerCompose(catalog);
   assert.match(compose, /degraded-dashboard:/);
+  assert.match(compose, /run-managed-service\.mjs/);
+  assert.match(compose, /--health-url.*19891/);
+  assert.match(compose, /--command.*node server\.mjs/);
   assert.doesNotMatch(compose, /readiness_probe:/);
   assert.doesNotMatch(compose, /liveness_probe:/);
-  assert.doesNotMatch(compose, /19891/);
+});
+
+test("keeps services without a health endpoint on their existing direct lifecycle", () => {
+  const catalog = structuredClone(loadCatalog());
+  catalog.services = [normalizeService({
+    id: "plain-worker",
+    name: "Plain Worker",
+    command: "node worker.mjs",
+    workingDir: "/tmp",
+    healthUrl: ""
+  })];
+  catalog.tunnels = [];
+  const compose = renderWorkerCompose(catalog);
+  assert.match(compose, /command: "node worker\.mjs"/);
+  assert.doesNotMatch(compose, /run-managed-service\.mjs/);
 });
 
 test("startup-restored SSH tunnels use a forty-retry runtime policy", () => {

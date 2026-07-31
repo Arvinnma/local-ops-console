@@ -5,6 +5,17 @@ export async function enrichServiceProcess(definition, process, options = {}) {
   if (!definition.healthUrl) return process;
 
   const healthCheck = serviceHealthDescriptor(definition.healthUrl);
+  if (process.managedService?.phase === "port_conflict") {
+    return {
+      ...process,
+      health: "degraded",
+      serviceReady: false,
+      healthCheck: {
+        ...healthCheck,
+        error: process.managedService.error || "服务端口已被其他进程占用"
+      }
+    };
+  }
   if (process.status !== "running" || !process.active) {
     return {
       ...process,

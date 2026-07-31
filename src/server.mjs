@@ -11,6 +11,7 @@ import {
   PROCESS_COMPOSE_PATH,
   PROCESS_LIFECYCLE_PATH,
   ROOT,
+  RUNTIME_DIR,
   SSH_ASKPASS_PATH,
   SYSTEM_PROCESS_DEFINITIONS,
   TOKEN_PATH,
@@ -54,6 +55,13 @@ import {
 import { enrichTunnelProcess, pruneTunnelRuntime, resetTunnelRuntime } from "./tunnel-health.mjs";
 import { enrichServiceProcess } from "./service-health.mjs";
 import { readTunnelNetworkState, writeTunnelNetworkState } from "./tunnel-network.mjs";
+import {
+  managedRuntimeActive,
+  managedServiceStatePath,
+  readManagedServiceState,
+  reconcileManagedServiceProcess,
+  stopManagedServiceRuntime
+} from "./managed-service.mjs";
 
 const execFileAsync = promisify(execFile);
 const PUBLIC_DIR = path.join(ROOT, "public");
@@ -504,7 +512,14 @@ async function getState(catalog, force = false) {
   const rawByName = new Map(rawProcesses.map((item) => [String(item.name || item.process || item.process_name), item]));
   pruneTunnelRuntime(catalog.tunnels.map((item) => item.id));
   const processes = await Promise.all(definitions.map(async (definition) => {
-    const process = normalizeProcess(definition, rawByName.get(definition.id));
+    let process = normalizeProcess(definition, rawByName.get(definition.id));
+    if (isManagedUserService(catalog, definition.id)) {
+      process = reconcileManagedServiceProcess(
+        definition,
+        process,
+        readManagedServiceState(managedServiceStatePath(RUNTIME_DIR, definition.id))
+      );
+    }
     const processLifecycle = auditObservedStop(
       definition,
       process,
@@ -1002,15 +1017,42 @@ async function processAction(catalog, id, action, options = {}) {
   const previous = processActionQueues.get(id) || Promise.resolve();
   const task = previous.catch(() => {}).then(async () => {
     const role = definition.kind === "system" ? "core" : "worker";
+    const managedService = isManagedUserService(catalog, id);
+    const stateFile = managedService ? managedServiceStatePath(RUNTIME_DIR, id) : "";
+    const runtimeState = managedService ? readManagedServiceState(stateFile) : null;
+    const runtimeActive = managedRuntimeActive(runtimeState);
     if (action === "start" || action === "stop") {
       const rawProcesses = await processList(catalog, role);
       const raw = rawProcesses.find((item) => String(item.name || item.process || item.process_name) === id);
-      const current = normalizeProcess(definition, raw);
+      const current = managedService
+        ? reconcileManagedServiceProcess(definition, normalizeProcess(definition, raw), runtimeState)
+        : normalizeProcess(definition, raw);
       if (action === "start" && current.active) return { skipped: true };
       if (action === "stop" && !current.active) return { skipped: true };
     }
     if (typeof options.beforeRun === "function") await options.beforeRun();
-    await runProcessCompose(catalog, ["process", action, id], role);
+    if (managedService && action === "restart" && runtimeActive) {
+      try {
+        await runProcessCompose(catalog, ["process", "stop", id], role);
+      } catch (error) {
+        if (!managedRuntimeActive(readManagedServiceState(stateFile))) throw error;
+      }
+      await stopManagedServiceRuntime(stateFile);
+      await runProcessCompose(catalog, ["process", "start", id], role);
+      return { skipped: false };
+    }
+    let processComposeError = null;
+    try {
+      await runProcessCompose(catalog, ["process", action, id], role);
+    } catch (error) {
+      processComposeError = error;
+    }
+    if (managedService && action === "stop") {
+      await stopManagedServiceRuntime(stateFile);
+    }
+    if (processComposeError && !(managedService && action === "stop" && runtimeActive)) {
+      throw processComposeError;
+    }
     return { skipped: false };
   });
   processActionQueues.set(id, task);
@@ -1019,6 +1061,10 @@ async function processAction(catalog, id, action, options = {}) {
   } finally {
     if (processActionQueues.get(id) === task) processActionQueues.delete(id);
   }
+}
+
+function isManagedUserService(catalog, id) {
+  return catalog.services.some((item) => item.id === id);
 }
 
 function attachLifecycle(process, lifecycle) {

@@ -4,6 +4,8 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-08-01
+
 ### Fixed
 
 - Keep the main console catalog synchronized with `/api/bootstrap` during normal refreshes, so tunnels, services, routes, terminal actions, and settings added by another client appear without reopening the App.
@@ -14,6 +16,8 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 - Remove user-service HTTP readiness/liveness probes from generated Process Compose configuration so an unavailable dashboard upstream does not enter an unbounded restart loop.
 - Persist process desired state and auditable start/stop metadata, including the requesting UI, API, menu-bar, startup, or orchestrator source.
 - Preserve desired-running services and tunnels when session capture overlaps a short Process Compose restart window.
+- Reconcile managed HTTP-service state with the real child process when Process Compose loses track of it, preventing a surviving dashboard from being duplicated.
+- Block duplicate starts on an occupied loopback health port, keep the supervisor in a stable degraded state instead of restarting forever, and clean the complete process tree on stop or restart.
 
 ### Documentation
 
@@ -110,6 +114,7 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 - Added the self-contained Electron DMG, automatic backend installation, portless loopback access, and bundled Caddy / Process Compose binaries.
 
 [1.7.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.7.0
+[1.8.3]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.3
 [1.8.2]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.2
 [1.8.1]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.1
 [1.8.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.0

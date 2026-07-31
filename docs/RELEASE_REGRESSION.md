@@ -13,7 +13,7 @@ git rev-parse HEAD
 git remote -v
 git ls-remote forgejo refs/heads/main
 git ls-remote origin refs/heads/main
-git rev-parse 'v1.8.2^{}'
+git rev-parse 'v1.8.3^{}'
 ```
 
 Record these separately:
@@ -117,6 +117,9 @@ Use an isolated runtime directory. Do not stop production resources for this gat
 4. Return `503` or a timeout from a managed service's health URL. Its process PID and restart count must remain unchanged while the UI reports **Service Degraded**.
 5. Restore the health endpoint to `200`; the same service process must recover to healthy.
 6. Generate worker YAML and confirm user services and tunnels contain no `readiness_probe` or `liveness_probe`.
+7. Force Process Compose to report a managed HTTP service as exited while its tracked child remains alive; the API must reconcile to the real child PID without launching a duplicate.
+8. Occupy the configured loopback health port before start; Local Ops must remain degraded with one supervisor, must not launch the command, and must not accumulate restarts.
+9. Stop the service and confirm the tracked child and every descendant process are gone. Start and restart it once each, then verify exactly one listener owner remains.
 
 ## 6. Package and installed-runtime verification
 
