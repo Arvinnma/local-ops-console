@@ -28,7 +28,7 @@ Local Ops combines an Electron desktop app, a browser console, Process Compose, 
 - Docker Desktop is optional and is required only for Docker controls
 - Terminal.app is built in; iTerm2 is optional
 
-Intel (`x64`) packages are not provided in v1.8.3.
+Intel (`x64`) packages are not provided in v1.8.4.
 
 ## What it manages
 
@@ -49,7 +49,7 @@ Intel (`x64`) packages are not provided in v1.8.3.
 
 ## Install
 
-1. Download `Local-Ops-1.8.3-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
+1. Download `Local-Ops-1.8.4-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch **Local Ops** from Applications.
 
@@ -83,6 +83,8 @@ A tunnel's SSH/TCP liveness is determined by its managed SSH process and loopbac
 HTTP readiness probes use a ten-second timeout so a busy forwarded service is not falsely rejected after two seconds. Complete domain-entry checks accept `401` and `403` in addition to `2xx/3xx`: those responses prove that an authentication-protected application answered, not that login succeeded. A terminal domain-entry failure receives one low-frequency recovery probe every 30 seconds instead of remaining locked forever.
 
 Managed process lifecycle decisions are written to the local runtime audit store with the requested action, source, reason, and timestamp. Previous-session restoration follows the persisted desired state, so a short orchestrator restart window cannot silently remove a service or tunnel that the user still expects to run.
+
+Stopping a service or tunnel from the menu bar now requires a trusted user click and an explicit confirmation. The control API rejects unconfirmed menu-bar stop requests, records the event name, action ID, call path, and confirmed intent, and keeps a previously remembered tunnel when an unconfirmed menu-bar stop is observed.
 
 Services with a loopback HTTP health URL now run through a small Local Ops supervisor. The supervisor reconciles the real child PID when the orchestrator briefly loses track of it, blocks duplicate starts when the configured local port is already occupied, cleans up the full process tree on stop, and reports a permanent port conflict as degraded instead of entering an unlimited restart loop. Services without a health URL keep their existing direct Process Compose lifecycle.
 
@@ -157,13 +159,13 @@ npm ci
 npm run dmg
 ```
 
-The distributable is written to `desktop/dist/Local-Ops-1.8.3-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
+The distributable is written to `desktop/dist/Local-Ops-1.8.4-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
 
 Read [Development and Release Guide](docs/DEVELOPMENT.md) before changing packaging, native helpers, loopback bindings, or Electron security settings.
 
 ## Verification
 
-The v1.8.3 release gate covers syntax and unit tests, bilingual static-copy coverage, configuration round trips, API security checks, managed-child reconciliation, duplicate-port protection, process-tree cleanup, service lifecycle and logs, SSH network gating with bounded retries, complete domain-entry checks, Caddy path routing, Docker state reads, encrypted-key Keychain integration, silent login-item startup, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, and mounted-DMG layout/signature checks.
+The v1.8.4 release gate covers syntax and unit tests, bilingual static-copy coverage, configuration round trips, API security checks, trusted menu-bar actions and stop confirmation, desired-state preservation, managed-child reconciliation, duplicate-port protection, process-tree cleanup, service lifecycle and logs, SSH network gating with bounded retries, complete domain-entry checks, Caddy path routing, Docker state reads, encrypted-key Keychain integration, silent login-item startup, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, and mounted-DMG layout/signature checks.
 
 Maintainers must consult [Authoritative Project Status](docs/PROJECT_STATUS.md) before describing a fix as public: the public GitHub release and the privately verified runtime can intentionally be at different commits. The repeatable verification sequence is in [Release and Hotfix Regression Manual](docs/RELEASE_REGRESSION.md).
 

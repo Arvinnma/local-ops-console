@@ -4,8 +4,9 @@ import vm from "node:vm";
 import { readFile } from "node:fs/promises";
 
 function element() {
+  const listeners = new Map();
   return {
-    addEventListener() {},
+    addEventListener(type, listener) { listeners.set(type, listener); },
     append() {},
     classList: { add() {}, remove() {} },
     dataset: {},
@@ -17,7 +18,8 @@ function element() {
     replaceChildren() {},
     setAttribute() {},
     style: { removeProperty() {}, setProperty() {} },
-    textContent: ""
+    textContent: "",
+    dispatch(type, event = {}) { return listeners.get(type)?.({ type, ...event }); }
   };
 }
 
@@ -70,4 +72,37 @@ test("the control-panel button is reusable after every show-main action", async 
 
   assert.equal(control.disabled, false);
   assert.equal(calls, 2);
+});
+
+test("resource rows only dispatch actions from a trusted click and include audit context", async () => {
+  const calls = [];
+  const context = await loadTrayRenderer(async (payload) => {
+    calls.push(payload);
+    return {};
+  });
+  const row = context.renderResourceRow("tunnels", {
+    id: "panel-office",
+    name: "1Panel",
+    disabled: false,
+    status: "已连接",
+    action: { type: "process", id: "panel-office", kind: "tunnel" }
+  });
+
+  row.dispatch("click", { isTrusted: false });
+  assert.equal(calls.length, 0);
+  row.dispatch("click", { isTrusted: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].eventName, "tray-panel.resource-row.click");
+  assert.equal(calls[0].gestureType, "click");
+  assert.match(calls[0].gestureAt, /^\d{4}-/);
+});
+
+test("desktop tray stop mutations require confirmation and send lifecycle audit headers", async () => {
+  const source = await readFile(new URL("../desktop/main.cjs", import.meta.url), "utf8");
+  assert.match(source, /confirmTrayProcessStop\(definition, "tray-panel"\)/);
+  assert.match(source, /X-Local-Ops-Event-Name/);
+  assert.match(source, /X-Local-Ops-Action-Id/);
+  assert.match(source, /X-Local-Ops-Call-Path/);
+  assert.match(source, /X-Local-Ops-User-Intent-Confirmed/);
 });

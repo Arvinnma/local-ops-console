@@ -6,6 +6,7 @@ import path from "node:path";
 
 import {
   processMutationActor,
+  processMutationAudit,
   readProcessLifecycle,
   reconcileRememberedProcessIds,
   recordProcessActionRequest,
@@ -22,6 +23,21 @@ test("UI/API process stop requests resolve to auditable actors", () => {
     "utf8"
   );
   assert.match(browserSource, /X-Local-Ops-Requested-By"\]\s*=\s*"ui"/);
+});
+
+test("tray mutation audit keeps the event, action id, call path, and explicit intent", () => {
+  assert.deepEqual(processMutationAudit({
+    "x-local-ops-event-name": "tray-panel.resource-row.click",
+    "x-local-ops-action-id": "action-123",
+    "x-local-ops-call-path": "tray.renderer>desktop.ipc>control-api",
+    "x-local-ops-user-intent-confirmed": "true"
+  }), {
+    eventName: "tray-panel.resource-row.click",
+    actionId: "action-123",
+    callPath: "tray.renderer>desktop.ipc>control-api",
+    userIntentConfirmed: true
+  });
+  assert.equal(processMutationAudit({}).userIntentConfirmed, undefined);
 });
 
 test("explicit UI and API stops retain their source, reason, and timestamp", (t) => {
@@ -132,6 +148,56 @@ test("an explicit stop removes a resource from the remembered session", (t) => {
     previousIds: ["panel-office"]
   });
   assert.deepEqual(remembered, []);
+});
+
+test("session capture preserves a previously remembered tunnel after an unconfirmed tray stop", (t) => {
+  const fixture = lifecycleFixture(t);
+  const definitions = [{ id: "panel-office", kind: "tunnel" }];
+  recordProcessLifecycle(fixture.file, {
+    id: "panel-office",
+    kind: "tunnel",
+    desiredState: "stopped",
+    action: "stop",
+    requestedBy: "tray",
+    reason: "tray_stop"
+  });
+  const remembered = reconcileRememberedProcessIds({
+    file: fixture.file,
+    definitions,
+    activeIds: [],
+    previousIds: ["panel-office"],
+    now: "2026-08-04T15:34:33.000Z"
+  });
+  assert.deepEqual(remembered, ["panel-office"]);
+  const entry = readProcessLifecycle(fixture.file).processes["panel-office"];
+  assert.equal(entry.desiredState, "running");
+  assert.equal(entry.lastAction.reason, "preserved_unconfirmed_tray_stop");
+});
+
+test("session capture honors a confirmed tray stop", (t) => {
+  const fixture = lifecycleFixture(t);
+  const definitions = [{ id: "panel-office", kind: "tunnel" }];
+  recordProcessActionRequest(fixture.file, {
+    id: "panel-office",
+    kind: "tunnel",
+    action: "stop",
+    requestedBy: "tray",
+    userIntentConfirmed: true,
+    eventName: "tray-panel.resource-row.click",
+    actionId: "action-456",
+    callPath: "tray.renderer>desktop.ipc>control-api"
+  });
+  const remembered = reconcileRememberedProcessIds({
+    file: fixture.file,
+    definitions,
+    activeIds: [],
+    previousIds: ["panel-office"]
+  });
+  assert.deepEqual(remembered, []);
+  const stop = readProcessLifecycle(fixture.file).processes["panel-office"].lastStop;
+  assert.equal(stop.userIntentConfirmed, true);
+  assert.equal(stop.eventName, "tray-panel.resource-row.click");
+  assert.equal(stop.actionId, "action-456");
 });
 
 test("a legacy remembered resource is migrated to desired running even while inactive", (t) => {

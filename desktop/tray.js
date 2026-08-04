@@ -115,7 +115,15 @@ function renderResourceRow(sectionId, item) {
   }
 
   if (!item.disabled) {
-    row.addEventListener("click", () => runPanelAction(item.action, row));
+    row.addEventListener("click", (event) => {
+      if (!event.isTrusted) return;
+      runPanelAction({
+        ...item.action,
+        eventName: "tray-panel.resource-row.click",
+        gestureType: event.type,
+        gestureAt: new Date().toISOString()
+      }, row);
+    });
   }
   return row;
 }

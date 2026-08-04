@@ -2,13 +2,13 @@
 
 [简体中文](USER_GUIDE.zh-CN.md) · [Project README](../README.md) · [Security](../SECURITY.md)
 
-This guide applies to Local Ops v1.8.3 on Apple Silicon macOS.
+This guide applies to Local Ops v1.8.4 on Apple Silicon macOS.
 
 ## 1. Install, update, and open
 
 ### Install
 
-1. Download `Local-Ops-1.8.3-arm64.dmg` from GitHub Releases.
+1. Download `Local-Ops-1.8.4-arm64.dmg` from GitHub Releases.
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch the app from Applications.
 
@@ -59,7 +59,7 @@ Select the Local Ops status item in the macOS menu bar. The 330 px panel keeps e
 
 Services, tunnels, terminal actions, and containers use an aligned trailing state column: green is on or ready, red is off, and yellow means an action is in progress. Reverse-proxy rows reserve one half for the display name and one half for the right-aligned web address; they do not show a running-state label.
 
-Selecting a service, tunnel, or container toggles it. Selecting a terminal action runs it. Selecting a route opens it in the default browser. The fixed footer contains Refresh, Show Console, Open in Browser, Open Logs, and Quit App. The panel refreshes every 10 seconds and immediately after actions.
+Selecting a service, tunnel, or container toggles it. A stop requires an explicit confirmation; closing the confirmation leaves the process and remembered session unchanged. Only trusted user clicks are accepted, and unconfirmed menu-bar stop requests are rejected by the control API. Selecting a terminal action runs it. Selecting a route opens it in the default browser. The fixed footer contains Refresh, Show Console, Open in Browser, Open Logs, and Quit App. The panel refreshes every 10 seconds and immediately after actions.
 
 The main console refreshes both runtime state and the current resource catalog. Resources created or edited through the Local Ops HTTP API, the menu-bar process, or another open client therefore appear in the App without restarting or reopening the window. This synchronization covers services, SSH tunnels, monitored services, reverse-proxy routes, terminal actions, and settings.
 
@@ -170,7 +170,7 @@ Local Ops records the desired state for managed services and tunnels separately 
 ~/.local/share/local-ops/runtime/process-lifecycle.json
 ```
 
-The source distinguishes web UI, API, menu bar, app startup, app quit, health logic, and orchestrator observations. An explicit stop changes desired state to stopped; a transient observed stop does not silently erase a previous running intent.
+The source distinguishes web UI, API, menu bar, app startup, app quit, health logic, and orchestrator observations. Menu-bar audit entries additionally retain the event name, action ID, call path, and whether user intent was confirmed. An explicit confirmed stop changes desired state to stopped; an unconfirmed menu-bar stop or transient observed stop does not silently erase a previous running intent.
 
 ### Encrypted private keys and Keychain
 

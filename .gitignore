@@ -33,6 +33,7 @@ desktop/build/*.icns
 desktop/build/*.iconset/
 
 # 编辑器与临时文件
+.tmp-tests/
 .idea/
 .vscode/
 *.tmp

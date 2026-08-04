@@ -499,16 +499,35 @@ function managedProcessMenu(definitions, processById, kind) {
     return {
       label: trayManagedResourceLabel(definition.name || definition.id, processState, kind, trayActionsInFlight.has(actionKey)),
       enabled: isOnline && !trayActionsInFlight.has(actionKey),
-      click: () => void performTrayMutation(
-        actionKey,
-        `/api/processes/${encodeURIComponent(definition.id)}/${action}`,
-        trayText(
-          `${active ? "停止" : "启动"}${kind === "tunnel" ? " SSH 隧道" : "服务"}失败`,
-          `Failed to ${active ? "stop" : "start"} ${kind === "tunnel" ? "SSH tunnel" : "service"}`
-        )
-      )
+      click: () => void performNativeTrayProcessMutation({ definition, kind, action, actionKey })
     };
   });
+}
+
+async function performNativeTrayProcessMutation({ definition, kind, action, actionKey }) {
+  const errorTitle = trayText(
+    `${action === "stop" ? "停止" : "启动"}${kind === "tunnel" ? " SSH 隧道" : "服务"}失败`,
+    `Failed to ${action === "stop" ? "stop" : "start"} ${kind === "tunnel" ? "SSH tunnel" : "service"}`
+  );
+  try {
+    const confirmed = action !== "stop" || await confirmTrayProcessStop(definition, "native-tray-menu");
+    if (!confirmed) return;
+    await runTrayMutation(
+      actionKey,
+      `/api/processes/${encodeURIComponent(definition.id)}/${action}`,
+      30000,
+      trayProcessAudit({
+        eventName: "native-tray.resource-menu.click",
+        definition,
+        action,
+        confirmed,
+        callPath: "desktop.native-tray:resource-menu.click>control-api"
+      })
+    );
+  } catch (error) {
+    log(`tray action ${actionKey} failed: ${error.message}`);
+    dialog.showErrorBox(errorTitle, nativeErrorMessage(error.message));
+  }
 }
 
 function routeMenu(routes) {
@@ -862,9 +881,29 @@ async function performTrayPanelAction(payload = {}) {
     if (!definition) throw new Error("没有找到该服务或 SSH 隧道");
     const active = processIsActive(processById.get(definition.id));
     const action = active ? "stop" : "start";
+    const eventName = String(payload.eventName || "");
+    const gestureAt = Date.parse(String(payload.gestureAt || ""));
+    if (
+      eventName !== "tray-panel.resource-row.click"
+      || payload.gestureType !== "click"
+      || !Number.isFinite(gestureAt)
+      || Math.abs(Date.now() - gestureAt) > 10000
+    ) {
+      throw new Error("托盘操作缺少有效的用户点击，已取消");
+    }
+    const confirmed = action !== "stop" || await confirmTrayProcessStop(definition, "tray-panel");
+    if (!confirmed) return { cancelled: true };
     await runTrayMutation(
       `process:${definition.id}`,
-      `/api/processes/${encodeURIComponent(definition.id)}/${action}`
+      `/api/processes/${encodeURIComponent(definition.id)}/${action}`,
+      30000,
+      trayProcessAudit({
+        eventName,
+        definition,
+        action,
+        confirmed,
+        callPath: "tray.renderer:resource-row.click>desktop.ipc:performTrayPanelAction>control-api"
+      })
     );
     return { message: trayText(`${definition.name || definition.id} 已${active ? "关闭" : "开启"}`, `${definition.name || definition.id} ${active ? "stopped" : "started"}`) };
   }
@@ -901,7 +940,7 @@ async function performTrayMutation(actionKey, requestPath, errorTitle, timeout =
   }
 }
 
-async function runTrayMutation(actionKey, requestPath, timeout = 30000) {
+async function runTrayMutation(actionKey, requestPath, timeout = 30000, audit = {}) {
   if (trayActionsInFlight.has(actionKey)) return;
   trayActionsInFlight.add(actionKey);
   rebuildTrayMenu();
@@ -911,14 +950,48 @@ async function runTrayMutation(actionKey, requestPath, timeout = 30000) {
       method: "POST",
       headers: {
         "X-Local-Ops-Token": bootstrap.csrfToken,
-        "X-Local-Ops-Requested-By": "tray"
+        "X-Local-Ops-Requested-By": "tray",
+        "X-Local-Ops-Event-Name": audit.eventName || "tray.action",
+        "X-Local-Ops-Action-Id": audit.actionId || crypto.randomUUID(),
+        "X-Local-Ops-Call-Path": audit.callPath || "desktop.tray>runTrayMutation>control-api",
+        "X-Local-Ops-User-Intent-Confirmed": audit.userIntentConfirmed ? "true" : "false"
       },
       timeout
     });
+    log(`tray mutation completed ${JSON.stringify({ actionKey, requestPath, ...audit })}`);
   } finally {
     trayActionsInFlight.delete(actionKey);
     await refreshTraySnapshot(true);
   }
+}
+
+async function confirmTrayProcessStop(definition, source) {
+  const result = await dialog.showMessageBox({
+    type: "warning",
+    buttons: [trayText("取消", "Cancel"), trayText("停止", "Stop")],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: trayText("确认停止", "Confirm Stop"),
+    message: trayText(
+      `确定要停止“${definition.name || definition.id}”吗？`,
+      `Stop “${definition.name || definition.id}”?`
+    ),
+    detail: trayText("停止后不会自动恢复，除非再次手动启动。", "It will not be restored automatically until you start it again.")
+  });
+  log(`tray stop confirmation ${JSON.stringify({ source, id: definition.id, confirmed: result.response === 1 })}`);
+  return result.response === 1;
+}
+
+function trayProcessAudit({ eventName, definition, action, confirmed, callPath }) {
+  return {
+    eventName,
+    actionId: crypto.randomUUID(),
+    callPath,
+    resourceId: definition.id,
+    action,
+    userIntentConfirmed: Boolean(confirmed)
+  };
 }
 
 function refreshTraySnapshot(force = false) {

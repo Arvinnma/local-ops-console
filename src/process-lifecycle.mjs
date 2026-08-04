@@ -51,6 +51,7 @@ export function recordProcessLifecycle(file, event) {
       reason: String(event.reason || action || "unknown").trim().slice(0, 240),
       at
     };
+    appendOptionalAuditFields(audit, event);
     const next = {
       ...previous,
       id: event.id,
@@ -73,7 +74,11 @@ export function recordProcessActionRequest(file, {
   kind,
   action,
   requestedBy,
-  at
+  at,
+  eventName,
+  actionId,
+  callPath,
+  userIntentConfirmed
 }) {
   if (!["start", "stop", "restart"].includes(action)) {
     throw new Error(`Unsupported process lifecycle action: ${action}`);
@@ -86,13 +91,27 @@ export function recordProcessActionRequest(file, {
     action,
     requestedBy: actor,
     reason: `${actor}_${action}`,
-    at
+    at,
+    eventName,
+    actionId,
+    callPath,
+    userIntentConfirmed
   });
 }
 
 export function processMutationActor(headers = {}) {
   const value = String(headers["x-local-ops-requested-by"] || "api").trim().toLowerCase();
   return ALLOWED_REQUEST_ACTORS.has(value) ? value : "api";
+}
+
+export function processMutationAudit(headers = {}) {
+  const userIntentHeader = String(headers["x-local-ops-user-intent-confirmed"] || "").trim().toLowerCase();
+  return {
+    eventName: normalizeAuditText(headers["x-local-ops-event-name"], 120),
+    actionId: normalizeAuditText(headers["x-local-ops-action-id"], 120),
+    callPath: normalizeAuditText(headers["x-local-ops-call-path"], 240),
+    userIntentConfirmed: userIntentHeader ? userIntentHeader === "true" : undefined
+  };
 }
 
 export function shouldAuditObservedStop(lifecycle, process, options = {}) {
@@ -124,6 +143,27 @@ export function reconcileRememberedProcessIds({
     for (const definition of definitions) {
       const id = String(definition.id);
       let entry = state.processes[id];
+      if (
+        previous.has(id)
+        && entry?.desiredState === "stopped"
+        && entry.lastStop?.requestedBy === "tray"
+        && entry.lastStop?.userIntentConfirmed !== true
+      ) {
+        const audit = {
+          action: "observe",
+          requestedBy: "session-capture",
+          reason: "preserved_unconfirmed_tray_stop",
+          at: now
+        };
+        entry = {
+          ...entry,
+          desiredState: "running",
+          updatedAt: now,
+          lastAction: audit
+        };
+        state.processes[id] = entry;
+        changed = true;
+      }
       if (!entry && (active.has(id) || previous.has(id))) {
         entry = normalizeEntry(id, {
           kind: definition.kind,
@@ -211,8 +251,28 @@ function normalizeAudit(value, includeAction = false) {
     reason: String(value.reason || "").slice(0, 240),
     at: validTimestamp(value.at, "")
   };
+  appendOptionalAuditFields(result, value);
   if (includeAction) result.action = String(value.action || "");
   return result;
+}
+
+function appendOptionalAuditFields(target, value = {}) {
+  const eventName = normalizeAuditText(value.eventName, 120);
+  const actionId = normalizeAuditText(value.actionId, 120);
+  const callPath = normalizeAuditText(value.callPath, 240);
+  if (eventName) target.eventName = eventName;
+  if (actionId) target.actionId = actionId;
+  if (callPath) target.callPath = callPath;
+  if (typeof value.userIntentConfirmed === "boolean") {
+    target.userIntentConfirmed = value.userIntentConfirmed;
+  }
+}
+
+function normalizeAuditText(value, limit) {
+  return String(value || "")
+    .replace(/[\r\n\t]+/g, " ")
+    .trim()
+    .slice(0, limit);
 }
 
 function normalizeActor(value) {

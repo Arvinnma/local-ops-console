@@ -1,6 +1,6 @@
 {
   "name": "local-ops-console",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "description": "A local-first macOS control plane for services, SSH tunnels, Docker containers, terminal tasks, and .localhost routes.",
   "private": true,
   "type": "module",

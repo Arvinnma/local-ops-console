@@ -13,7 +13,7 @@ git rev-parse HEAD
 git remote -v
 git ls-remote forgejo refs/heads/main
 git ls-remote origin refs/heads/main
-git rev-parse 'v1.8.3^{}'
+git rev-parse 'v1.8.4^{}'
 ```
 
 Record these separately:
@@ -120,6 +120,9 @@ Use an isolated runtime directory. Do not stop production resources for this gat
 7. Force Process Compose to report a managed HTTP service as exited while its tracked child remains alive; the API must reconcile to the real child PID without launching a duplicate.
 8. Occupy the configured loopback health port before start; Local Ops must remain degraded with one supervisor, must not launch the command, and must not accumulate restarts.
 9. Stop the service and confirm the tracked child and every descendant process are gone. Start and restart it once each, then verify exactly one listener owner remains.
+10. Dispatch a synthetic or untrusted menu-bar row click and confirm that no mutation is sent. A real stop click must show a confirmation before the API request.
+11. Send a menu-bar tunnel stop without `X-Local-Ops-User-Intent-Confirmed: true`; the API must return `409`, record no explicit stop, and preserve the previously remembered tunnel during session capture.
+12. Confirm a menu-bar stop and verify `eventName`, `actionId`, `callPath`, `userIntentConfirmed`, source, reason, and timestamp in `runtime/process-lifecycle.json`.
 
 ## 6. Package and installed-runtime verification
 

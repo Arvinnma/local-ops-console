@@ -1,6 +1,6 @@
 {
   "name": "local-ops-desktop",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "description": "Native macOS shell for the Local Ops control plane",
   "private": true,
   "main": "main.cjs",
@@ -18,7 +18,7 @@
     "dmg": "npm run icon && npm run bundle && electron-builder --mac dmg --arm64"
   },
   "devDependencies": {
-    "electron": "43.1.1",
+    "electron": "^43.2.0",
     "electron-builder": "26.15.3"
   },
   "build": {
@@ -55,7 +55,7 @@
     },
     "afterPack": "scripts/after-pack.cjs",
     "mac": {
-      "bundleVersion": "1.8.3",
+      "bundleVersion": "1.8.4",
       "target": [
         {
           "target": "dmg",

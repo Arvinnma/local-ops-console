@@ -4,6 +4,15 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ## [Unreleased]
 
+## [1.8.4] - 2026-08-05
+
+### Fixed
+
+- Require a trusted menu-bar click and an explicit confirmation before stopping a managed service or SSH tunnel.
+- Reject unconfirmed menu-bar tunnel stop requests in the control API instead of persisting them as deliberate user stops.
+- Record menu-bar stop event names, action IDs, call paths, and confirmed user intent in lifecycle and tunnel audit state.
+- Preserve a previously remembered tunnel when session capture encounters an unconfirmed menu-bar stop, preventing accidental bulk stops from becoming the next-launch baseline.
+
 ## [1.8.3] - 2026-08-01
 
 ### Fixed
@@ -114,6 +123,7 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 - Added the self-contained Electron DMG, automatic backend installation, portless loopback access, and bundled Caddy / Process Compose binaries.
 
 [1.7.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.7.0
+[1.8.4]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.4
 [1.8.3]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.3
 [1.8.2]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.2
 [1.8.1]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.1

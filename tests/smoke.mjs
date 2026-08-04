@@ -258,6 +258,18 @@ try {
   const tunnelPayload = (await api("/api/bootstrap")).config.tunnels.find((item) => item.id === ids.tunnel);
   assert.equal(tunnelPayload.hasKeyPassphrase, false);
   assert.equal("passphraseRef" in tunnelPayload, false);
+  const rejectedTrayStop = await fetch(`${BASE}/api/processes/${encodeURIComponent(ids.tunnel)}/stop`, {
+    method: "POST",
+    headers: {
+      "X-Local-Ops-Token": bootstrap.csrfToken,
+      "X-Local-Ops-Requested-By": "tray",
+      "X-Local-Ops-Event-Name": "tray-panel.resource-row.click",
+      "X-Local-Ops-Action-Id": `unconfirmed-${suffix}`,
+      "X-Local-Ops-Call-Path": "smoke>control-api",
+      "X-Local-Ops-User-Intent-Confirmed": "false"
+    }
+  });
+  assert.equal(rejectedTrayStop.status, 409);
 
   fixtureServer = await startFixtureServer();
   const fixturePort = fixtureServer.address().port;

@@ -46,6 +46,7 @@ import {
 import {
   lifecycleForProcess,
   processMutationActor,
+  processMutationAudit,
   readProcessLifecycle,
   reconcileRememberedProcessIds,
   recordProcessActionRequest,
@@ -131,6 +132,10 @@ const server = http.createServer(async (request, response) => {
         throw httpError(403, "控制台自身不能从网页停止");
       }
       const requestedBy = processMutationActor(request.headers);
+      const mutationAudit = processMutationAudit(request.headers);
+      if (definition.kind === "tunnel" && action === "stop" && requestedBy === "tray" && !mutationAudit.userIntentConfirmed) {
+        throw httpError(409, "托盘停止操作缺少明确用户确认，已拒绝执行");
+      }
       const at = new Date().toISOString();
       if (definition.kind === "tunnel" && action !== "stop") await assertPassphraseAvailable(definition);
       recordProcessActionRequest(PROCESS_LIFECYCLE_PATH, {
@@ -138,10 +143,11 @@ const server = http.createServer(async (request, response) => {
         kind: definition.kind,
         action,
         requestedBy,
-        at
+        at,
+        ...mutationAudit
       });
       if (definition.kind === "tunnel" && action === "restart") {
-        markTunnelStopRequested(definition, requestedBy, action, at);
+        markTunnelStopRequested(definition, requestedBy, action, at, mutationAudit);
       }
       if (definition.kind === "tunnel" && action !== "stop") {
         await configureTunnelRetryLimits(catalog, [id], TUNNEL_MANUAL_RETRY_LIMIT);
@@ -149,7 +155,7 @@ const server = http.createServer(async (request, response) => {
       if (definition.kind === "tunnel") resetTunnelRuntime(id);
       await processAction(catalog, id, action, {
         beforeRun: definition.kind === "tunnel" && action === "stop"
-          ? () => markTunnelStopRequested(definition, requestedBy, action, at)
+          ? () => markTunnelStopRequested(definition, requestedBy, action, at, mutationAudit)
           : null
       });
       invalidateState();
@@ -1094,7 +1100,7 @@ function auditObservedStop(definition, process, lifecycle) {
   });
 }
 
-function markTunnelStopRequested(definition, requestedBy, action, at) {
+function markTunnelStopRequested(definition, requestedBy, action, at, audit = {}) {
   const file = tunnelNetworkStatePath(definition.id);
   const previous = readTunnelNetworkState(file) || {};
   writeTunnelNetworkState(file, {
@@ -1105,7 +1111,11 @@ function markTunnelStopRequested(definition, requestedBy, action, at) {
     phase: "stopping",
     requestedBy,
     stopReason: action === "restart" ? "restart_requested" : "explicit_stop",
-    stopRequestedAt: at
+    stopRequestedAt: at,
+    eventName: audit.eventName || "",
+    actionId: audit.actionId || "",
+    callPath: audit.callPath || "",
+    userIntentConfirmed: audit.userIntentConfirmed
   });
 }
 
