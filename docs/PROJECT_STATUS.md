@@ -4,7 +4,7 @@
 
 This file is the project-owned source of truth for the currently installed build, public distribution baseline, private verified baseline, and release-readiness behavior. Update it after every release or verified post-release hotfix. Roadmap ideas and external knowledge bases are not authoritative for shipped state.
 
-Status date: **2026-08-01**
+Status date: **2026-08-05**
 
 ## English
 
@@ -12,16 +12,16 @@ Status date: **2026-08-01**
 
 | Scope | Version / commit | Meaning |
 | --- | --- | --- |
-| Installed application / runtime | App `1.8.2`; runtime overlay `95e0fa2` | `/Applications/Local Ops.app` has not been replaced by this release; the installed backend contains the accepted v1.8.3 lifecycle implementation |
-| Public GitHub runtime baseline | `95e0fa2843fc156cf0a35c32a79f780c174df033` | Source commit behind the public `v1.8.3` tag and DMG |
-| Public `v1.8.3` DMG | SHA-256 `b5fc2973b098af01141fc33d569fb67fe7999df8c396dd8d580b28103d15f39e` | Published GitHub Release artifact, Apple Silicon only |
-| Public `v1.8.3` tag | `95e0fa2843fc156cf0a35c32a79f780c174df033` | Immutable released source baseline |
-| Private Forgejo runtime baseline | `95e0fa2843fc156cf0a35c32a79f780c174df033` | Matches the public released runtime source |
-| Verified release DMG | SHA-256 `b5fc2973b098af01141fc33d569fb67fe7999df8c396dd8d580b28103d15f39e` | `Local-Ops-1.8.3-arm64.dmg`; checksum, signature, architecture, mounted layout, version, and packaged lifecycle files verified |
+| Installed application / runtime | App `1.8.3`; accepted `1.8.4` tray-safety overlay | `/Applications/Local Ops.app` and the installed backend contain the trusted-click, stop-confirmation, and desired-state preservation fix; the packaged `1.8.4` App has not been installed during this release task |
+| Public GitHub runtime baseline | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | Source commit behind the public `v1.8.4` tag and DMG |
+| Public `v1.8.4` DMG | SHA-256 `0f48d4915cca3287b7e727972269cf569313a4e0b2e74516a81b4c1be42b427a` | Published GitHub Release artifact, Apple Silicon only |
+| Public `v1.8.4` tag | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | Immutable released source baseline |
+| Private Forgejo runtime baseline | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | Matches the public released runtime source |
+| Verified release DMG | SHA-256 `0f48d4915cca3287b7e727972269cf569313a4e0b2e74516a81b4c1be42b427a` | `Local-Ops-1.8.4-arm64.dmg`; checksum, ad-hoc signature, arm64 architecture, mounted layout, version, bundled tools, and packaged tray/lifecycle files verified |
 
-Documentation-only commits may advance either `main`; `95e0fa2` remains the latest runtime-affecting baseline for both repositories.
+Documentation-only commits may advance either `main`; `c1c20dc` remains the latest runtime-affecting baseline for both repositories.
 
-The ProxyJump, resource-synchronization, SSH/readiness, and managed-service lifecycle fixes are committed and packaged in v1.8.3. The currently installed 1.8.2 App has the lifecycle implementation as a verified backend overlay, but the new public DMG has not been installed over `/Applications/Local Ops.app` in this release task.
+The ProxyJump, resource-synchronization, SSH/readiness, managed-service lifecycle, and menu-bar stop-safety fixes are committed and packaged in v1.8.4. The currently installed 1.8.3 App contains the accepted menu-bar overlay, but the new public DMG has not been installed over `/Applications/Local Ops.app` in this release task.
 
 ### Verified cold-start and SSH-readiness behavior
 
@@ -38,7 +38,9 @@ The ProxyJump, resource-synchronization, SSH/readiness, and managed-service life
 - Domain-entry recovery probes are throttled and do not restart an otherwise healthy SSH process.
 - Generated worker configuration contains no HTTP readiness/liveness probes for user services or tunnels. Service health failures report **Service Degraded** while the process remains alive.
 - Desired process state and stop audit are persisted in `runtime/process-lifecycle.json`; UI, API, menu-bar, startup, app-quit, health, and orchestrator sources retain a reason and timestamp.
+- Menu-bar service and tunnel stops require a trusted user click and explicit confirmation. Unconfirmed tray tunnel stops are rejected with HTTP `409`; audit records retain the event name, action ID, call path, and confirmed intent.
 - Session capture preserves desired-running resources across a transient Process Compose restart window; an explicit stop still removes the resource from the remembered session.
+- Session capture also preserves a previously remembered tunnel after an unconfirmed menu-bar stop, so an accidental tray incident cannot become the next-launch baseline.
 - Services with loopback HTTP health URLs run through a managed supervisor that records the real child PID and reconciles a false Process Compose exit without launching a duplicate.
 - An occupied health port blocks the child command and leaves one stable degraded supervisor instead of consuming an unlimited restart loop.
 - Managed stop and restart operations clean the complete child process tree. Services without a health URL keep their direct Process Compose lifecycle.
@@ -49,7 +51,7 @@ The main-console synchronization fix was runtime-verified against nine configure
 
 ### Current limitations and follow-up
 
-- `/Applications/Local Ops.app` remains version 1.8.2 until the user explicitly installs the new v1.8.3 DMG. The released v1.8.3 artifact already contains the accepted runtime fixes.
+- `/Applications/Local Ops.app` remains version 1.8.3 until the user explicitly installs the new v1.8.4 DMG. The released v1.8.4 artifact already contains the accepted runtime fixes.
 - Replacing the bundled backend currently restarts the Local Ops control plane. During the verified private installation this also restarted Process Compose worker SSH processes once. Schedule upgrades after active transfers complete until backend upgrades can preserve worker processes.
 - Distribution remains Apple Silicon only, ad-hoc signed, and not notarized.
 - A terminal domain-entry probe runs every 30 seconds until recovery. This is intentionally low frequency, but it still sends a real HTTP request to the configured local entry.
@@ -62,16 +64,16 @@ Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandat
 
 | 范围 | 版本 / 提交 | 含义 |
 | --- | --- | --- |
-| 当前安装 App / 运行副本 | App `1.8.2`；运行覆盖 `95e0fa2` | `/Applications/Local Ops.app` 尚未由本次发布替换；安装后台已包含 v1.8.3 的已验收生命周期实现 |
-| 公开 GitHub 运行代码基线 | `95e0fa2843fc156cf0a35c32a79f780c174df033` | 公开 `v1.8.3` 标签和 DMG 对应的源码提交 |
-| 公开 `v1.8.3` DMG | SHA-256 `b5fc2973b098af01141fc33d569fb67fe7999df8c396dd8d580b28103d15f39e` | GitHub Release 已发布制品，仅支持 Apple Silicon |
-| 公开 `v1.8.3` 标签 | `95e0fa2843fc156cf0a35c32a79f780c174df033` | 不可变的已发布源码基线 |
-| 私有 Forgejo 运行代码基线 | `95e0fa2843fc156cf0a35c32a79f780c174df033` | 与公开已发布运行源码一致 |
-| 已验证 Release DMG | SHA-256 `b5fc2973b098af01141fc33d569fb67fe7999df8c396dd8d580b28103d15f39e` | `Local-Ops-1.8.3-arm64.dmg` 已通过校验和、签名、架构、挂载布局、版本和打包生命周期文件检查 |
+| 当前安装 App / 运行副本 | App `1.8.3`；已验收 `1.8.4` 菜单栏安全覆盖 | `/Applications/Local Ops.app` 与安装后台已包含可信点击、停止确认和期望状态保留修复；本次发布任务没有安装新打包的 `1.8.4` App |
+| 公开 GitHub 运行代码基线 | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | 公开 `v1.8.4` 标签和 DMG 对应的源码提交 |
+| 公开 `v1.8.4` DMG | SHA-256 `0f48d4915cca3287b7e727972269cf569313a4e0b2e74516a81b4c1be42b427a` | GitHub Release 已发布制品，仅支持 Apple Silicon |
+| 公开 `v1.8.4` 标签 | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | 不可变的已发布源码基线 |
+| 私有 Forgejo 运行代码基线 | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | 与公开已发布运行源码一致 |
+| 已验证 Release DMG | SHA-256 `0f48d4915cca3287b7e727972269cf569313a4e0b2e74516a81b4c1be42b427a` | `Local-Ops-1.8.4-arm64.dmg` 已通过校验和、ad-hoc 签名、arm64 架构、挂载布局、版本、内置工具和打包菜单栏/生命周期文件检查 |
 
-后续纯文档提交可能继续推进任一 `main`；`95e0fa2` 仍是两个仓库最新的运行代码基线。
+后续纯文档提交可能继续推进任一 `main`；`c1c20dc` 仍是两个仓库最新的运行代码基线。
 
-ProxyJump、资源同步、SSH/readiness 和托管服务生命周期修复都已提交并打入 v1.8.3。当前安装的 1.8.2 App 已通过后台覆盖使用生命周期实现，但本次发布任务没有用新公开 DMG 覆盖 `/Applications/Local Ops.app`。
+ProxyJump、资源同步、SSH/readiness、托管服务生命周期和菜单栏停止安全修复都已提交并打入 v1.8.4。当前安装的 1.8.3 App 已使用经过验收的菜单栏覆盖，但本次发布任务没有用新公开 DMG 覆盖 `/Applications/Local Ops.app`。
 
 ### 已验证的冷启动与 SSH readiness 行为
 
@@ -88,7 +90,9 @@ ProxyJump、资源同步、SSH/readiness 和托管服务生命周期修复都已
 - 域名入口恢复探测有节流，不会重启本身仍然健康的 SSH 进程。
 - 生成的 Worker 配置不再给用户服务或隧道写入 HTTP readiness/liveness 探针；服务检查失败显示“服务降级”，进程继续存活。
 - 进程期望状态和停止审计保存在 `runtime/process-lifecycle.json`，网页 UI、API、菜单栏、启动、退出、健康逻辑和编排器来源都会留下原因与时间。
+- 菜单栏停止服务或隧道时必须来自可信的真实点击，并经过明确确认。未经确认的托盘隧道停止会返回 HTTP `409`；审计会保存事件名、动作 ID、调用路径和确认结果。
 - 会话捕获会在 Process Compose 短暂重启窗口保留期望运行的资源；显式停止仍会把资源从记忆会话移除。
+- 会话捕获遇到未经确认的菜单栏停止时，也会继续保留此前记忆的隧道，不让托盘异常固化成下次不恢复。
 - 配置回环 HTTP 健康地址的服务通过监督器运行，记录真实子进程 PID；Process Compose 误报退出时会按真实 PID 对账，不会重复拉起。
 - 健康端口被占用时阻止子命令启动，只保留一个稳定的降级监督器，不再消耗无限重启。
 - 托管停止与重启会清理完整子进程树；未配置健康地址的服务继续使用 Process Compose 直接生命周期。
@@ -99,7 +103,7 @@ ProxyJump、资源同步、SSH/readiness 和托管服务生命周期修复都已
 
 ### 尚未解决与后续事项
 
-- `/Applications/Local Ops.app` 在用户明确安装 v1.8.3 DMG 前仍是 1.8.2；新发布的 v1.8.3 制品已经包含上述已验收运行修复。
+- `/Applications/Local Ops.app` 在用户明确安装 v1.8.4 DMG 前仍是 1.8.3；新发布的 v1.8.4 制品已经包含上述已验收运行修复。
 - 当前替换内置后台会重启 Local Ops 控制面。私有制品安装验收时，Process Compose Worker 下的 SSH 进程也随之重启过一次。在升级流程能够保留 Worker 前，应避开正在进行的数据传输。
 - 当前只提供 Apple Silicon 包，使用 ad-hoc 签名，尚未公证。
 - 终态恢复期间每 30 秒会向配置的本地域名入口发送一次真实 HTTP 请求；频率已刻意降低，但并非零流量。
