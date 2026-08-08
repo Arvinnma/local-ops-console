@@ -4,7 +4,7 @@
 
 This file is the project-owned source of truth for the currently installed build, public distribution baseline, private verified baseline, and release-readiness behavior. Update it after every release or verified post-release hotfix. Roadmap ideas and external knowledge bases are not authoritative for shipped state.
 
-Status date: **2026-08-05**
+Status date: **2026-08-08**
 
 ## English
 
@@ -12,16 +12,16 @@ Status date: **2026-08-05**
 
 | Scope | Version / commit | Meaning |
 | --- | --- | --- |
-| Installed application / runtime | App `1.8.3`; accepted `1.8.4` tray-safety overlay | `/Applications/Local Ops.app` and the installed backend contain the trusted-click, stop-confirmation, and desired-state preservation fix; the packaged `1.8.4` App has not been installed during this release task |
-| Public GitHub runtime baseline | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | Source commit behind the public `v1.8.4` tag and DMG |
-| Public `v1.8.4` DMG | SHA-256 `0f48d4915cca3287b7e727972269cf569313a4e0b2e74516a81b4c1be42b427a` | Published GitHub Release artifact, Apple Silicon only |
-| Public `v1.8.4` tag | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | Immutable released source baseline |
-| Private Forgejo runtime baseline | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | Matches the public released runtime source |
-| Verified release DMG | SHA-256 `0f48d4915cca3287b7e727972269cf569313a4e0b2e74516a81b4c1be42b427a` | `Local-Ops-1.8.4-arm64.dmg`; checksum, ad-hoc signature, arm64 architecture, mounted layout, version, bundled tools, and packaged tray/lifecycle files verified |
+| Installed application / runtime | App `1.8.4` | `/Applications/Local Ops.app`; v1.8.5 was built and published without replacing the currently running App or restarting managed SSH tunnels |
+| Public GitHub runtime baseline | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | Source commit behind the public `v1.8.5` tag and DMG |
+| Public `v1.8.5` DMG | SHA-256 `968e389d1a188b7bc8d24465215b49ba37714d2465ec6573749016308a2a6fd9` | Published GitHub Release artifact, Apple Silicon only |
+| Public `v1.8.5` tag | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | Immutable released source baseline |
+| Private Forgejo runtime baseline | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | Matches the public released runtime source and private `v1.8.5` tag |
+| Verified release DMG | SHA-256 `968e389d1a188b7bc8d24465215b49ba37714d2465ec6573749016308a2a6fd9` | `Local-Ops-1.8.5-arm64.dmg`; checksum, ad-hoc signature, arm64 architecture, mounted layout, version, bundled tools, dynamic PF template, and packaged desktop files verified |
 
-Documentation-only commits may advance either `main`; `c1c20dc` remains the latest runtime-affecting baseline for both repositories.
+Documentation-only commits may advance either `main`; `3c37d96` remains the latest runtime-affecting baseline for both repositories.
 
-The ProxyJump, resource-synchronization, SSH/readiness, managed-service lifecycle, and menu-bar stop-safety fixes are committed and packaged in v1.8.4. The currently installed 1.8.3 App contains the accepted menu-bar overlay, but the new public DMG has not been installed over `/Applications/Local Ops.app` in this release task.
+The ProxyJump, resource-synchronization, SSH/readiness, managed-service lifecycle, menu-bar stop-safety, and configurable Caddy/PF port fixes are committed and packaged in v1.8.5. The currently installed App remains v1.8.4 because this release task deliberately built and published without replacing the live application.
 
 ### Verified cold-start and SSH-readiness behavior
 
@@ -44,6 +44,8 @@ The ProxyJump, resource-synchronization, SSH/readiness, managed-service lifecycl
 - Services with loopback HTTP health URLs run through a managed supervisor that records the real child PID and reconciles a false Process Compose exit without launching a duplicate.
 - An occupied health port blocks the child command and leaves one stable degraded supervisor instead of consuming an unlimited restart loop.
 - Managed stop and restart operations clean the complete child process tree. Services without a health URL keep their direct Process Compose lifecycle.
+- The Caddy internal port is editable only while portless access is disabled. Local Ops validates the range, control-plane collisions, and active listeners before atomically rendering and reloading the configuration.
+- The privileged PF anchor is generated from the selected Caddy port for both IPv4 and IPv6. A stale installed rule is reported as **Repair Portless Access** rather than as a failed SSH tunnel.
 
 The installed build was verified with private Git HTTP and `git ls-remote`, authentication-protected routes, and degraded-upstream recovery. The 2026-07-29 proxy hotfix was additionally verified with `office-server-01` (`HostName 127.0.0.1`, port `10022`, `ProxyJump frp-relay-01`): Open WebUI and Grafana tunnels both reached **Connected**, TCP/HTTP/domain checks passed, and `fullyAvailable` became true. Every pre-existing tunnel retained the same PID and restart count.
 
@@ -51,7 +53,7 @@ The main-console synchronization fix was runtime-verified against nine configure
 
 ### Current limitations and follow-up
 
-- `/Applications/Local Ops.app` remains version 1.8.3 until the user explicitly installs the new v1.8.4 DMG. The released v1.8.4 artifact already contains the accepted runtime fixes.
+- `/Applications/Local Ops.app` remains version 1.8.4 until the user explicitly installs the v1.8.5 DMG. The released v1.8.5 artifact contains the configurable Caddy/PF port fix.
 - Replacing the bundled backend currently restarts the Local Ops control plane. During the verified private installation this also restarted Process Compose worker SSH processes once. Schedule upgrades after active transfers complete until backend upgrades can preserve worker processes.
 - Distribution remains Apple Silicon only, ad-hoc signed, and not notarized.
 - A terminal domain-entry probe runs every 30 seconds until recovery. This is intentionally low frequency, but it still sends a real HTTP request to the configured local entry.
@@ -64,16 +66,16 @@ Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandat
 
 | 范围 | 版本 / 提交 | 含义 |
 | --- | --- | --- |
-| 当前安装 App / 运行副本 | App `1.8.3`；已验收 `1.8.4` 菜单栏安全覆盖 | `/Applications/Local Ops.app` 与安装后台已包含可信点击、停止确认和期望状态保留修复；本次发布任务没有安装新打包的 `1.8.4` App |
-| 公开 GitHub 运行代码基线 | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | 公开 `v1.8.4` 标签和 DMG 对应的源码提交 |
-| 公开 `v1.8.4` DMG | SHA-256 `0f48d4915cca3287b7e727972269cf569313a4e0b2e74516a81b4c1be42b427a` | GitHub Release 已发布制品，仅支持 Apple Silicon |
-| 公开 `v1.8.4` 标签 | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | 不可变的已发布源码基线 |
-| 私有 Forgejo 运行代码基线 | `c1c20dc2161dbdf38b4a277f1054c2593f76833d` | 与公开已发布运行源码一致 |
-| 已验证 Release DMG | SHA-256 `0f48d4915cca3287b7e727972269cf569313a4e0b2e74516a81b4c1be42b427a` | `Local-Ops-1.8.4-arm64.dmg` 已通过校验和、ad-hoc 签名、arm64 架构、挂载布局、版本、内置工具和打包菜单栏/生命周期文件检查 |
+| 当前安装 App / 运行副本 | App `1.8.4` | `/Applications/Local Ops.app`；v1.8.5 只完成构建和发布，没有覆盖当前运行 App，也没有重启托管 SSH 隧道 |
+| 公开 GitHub 运行代码基线 | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | 公开 `v1.8.5` 标签和 DMG 对应的源码提交 |
+| 公开 `v1.8.5` DMG | SHA-256 `968e389d1a188b7bc8d24465215b49ba37714d2465ec6573749016308a2a6fd9` | GitHub Release 已发布制品，仅支持 Apple Silicon |
+| 公开 `v1.8.5` 标签 | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | 不可变的已发布源码基线 |
+| 私有 Forgejo 运行代码基线 | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | 与公开已发布运行源码及私有 `v1.8.5` 标签一致 |
+| 已验证 Release DMG | SHA-256 `968e389d1a188b7bc8d24465215b49ba37714d2465ec6573749016308a2a6fd9` | `Local-Ops-1.8.5-arm64.dmg` 已通过校验和、ad-hoc 签名、arm64 架构、挂载布局、版本、内置工具、动态 PF 模板和桌面端打包文件检查 |
 
-后续纯文档提交可能继续推进任一 `main`；`c1c20dc` 仍是两个仓库最新的运行代码基线。
+后续纯文档提交可能继续推进任一 `main`；`3c37d96` 仍是两个仓库最新的运行代码基线。
 
-ProxyJump、资源同步、SSH/readiness、托管服务生命周期和菜单栏停止安全修复都已提交并打入 v1.8.4。当前安装的 1.8.3 App 已使用经过验收的菜单栏覆盖，但本次发布任务没有用新公开 DMG 覆盖 `/Applications/Local Ops.app`。
+ProxyJump、资源同步、SSH/readiness、托管服务生命周期、菜单栏停止安全和 Caddy/PF 可配置端口修复都已提交并打入 v1.8.5。当前安装 App 仍是 v1.8.4，因为本次发布任务刻意只构建并发布，没有覆盖现网 App。
 
 ### 已验证的冷启动与 SSH readiness 行为
 
@@ -96,6 +98,8 @@ ProxyJump、资源同步、SSH/readiness、托管服务生命周期和菜单栏�
 - 配置回环 HTTP 健康地址的服务通过监督器运行，记录真实子进程 PID；Process Compose 误报退出时会按真实 PID 对账，不会重复拉起。
 - 健康端口被占用时阻止子命令启动，只保留一个稳定的降级监督器，不再消耗无限重启。
 - 托管停止与重启会清理完整子进程树；未配置健康地址的服务继续使用 Process Compose 直接生命周期。
+- 只有关闭无端口访问后才能修改 Caddy 内部端口。Local Ops 会校验端口范围、控制面端口冲突和现有监听，再原子生成配置并热加载。
+- 特权 PF anchor 会按所选 Caddy 端口动态生成 IPv4 和 IPv6 规则；已安装规则过期时显示“修复无端口访问”，不再误报为 SSH 隧道失败。
 
 当前安装副本已完成私有 Git HTTP 与 `git ls-remote`、认证型入口和降级恢复验收。2026-07-29 又以 `office-server-01`（`HostName 127.0.0.1`、端口 `10022`、`ProxyJump frp-relay-01`）验证了代理热修：Open WebUI 与 Grafana 隧道均进入“已连接”，TCP、HTTP、域名检查通过，`fullyAvailable=true`；全部既有隧道的 PID 与重启次数保持不变。
 
@@ -103,7 +107,7 @@ ProxyJump、资源同步、SSH/readiness、托管服务生命周期和菜单栏�
 
 ### 尚未解决与后续事项
 
-- `/Applications/Local Ops.app` 在用户明确安装 v1.8.4 DMG 前仍是 1.8.3；新发布的 v1.8.4 制品已经包含上述已验收运行修复。
+- `/Applications/Local Ops.app` 在用户明确安装 v1.8.5 DMG 前仍是 1.8.4；新发布的 v1.8.5 制品已经包含 Caddy/PF 可配置端口修复。
 - 当前替换内置后台会重启 Local Ops 控制面。私有制品安装验收时，Process Compose Worker 下的 SSH 进程也随之重启过一次。在升级流程能够保留 Worker 前，应避开正在进行的数据传输。
 - 当前只提供 Apple Silicon 包，使用 ad-hoc 签名，尚未公证。
 - 终态恢复期间每 30 秒会向配置的本地域名入口发送一次真实 HTTP 请求；频率已刻意降低，但并非零流量。
