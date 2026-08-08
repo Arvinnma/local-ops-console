@@ -4,6 +4,18 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ## [Unreleased]
 
+## [1.8.5] - 2026-08-08
+
+### Added
+
+- Add an editable Caddy internal port to **Settings → Runtime Settings**, with integer, reserved-port, and live-listener validation before applying a change.
+
+### Fixed
+
+- Generate the privileged loopback PF anchor from the configured Caddy port instead of hard-coding `19080`.
+- Detect when the installed portless forwarding rule and the active Caddy port disagree, and guide the user to repair the rule instead of reporting every healthy SSH tunnel as failed.
+- Apply Caddy port changes atomically, reload the runtime configuration, and restore the previous catalog if rendering or reload fails.
+
 ## [1.8.4] - 2026-08-05
 
 ### Fixed
@@ -123,6 +135,7 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 - Added the self-contained Electron DMG, automatic backend installation, portless loopback access, and bundled Caddy / Process Compose binaries.
 
 [1.7.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.7.0
+[1.8.5]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.5
 [1.8.4]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.4
 [1.8.3]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.3
 [1.8.2]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.2

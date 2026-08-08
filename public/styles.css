@@ -616,7 +616,16 @@ tr[data-sort-item].drag-over { background: var(--brand-soft); }
 .settings-card dl { margin: 0; }
 .settings-card dl div { min-height: 44px; padding: 11px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 20px; }
 .settings-card dt { color: var(--muted); font-size: 13px; }
+.settings-card dt span, .settings-card dt small { display: block; }
+.settings-card dt small { margin-top: 3px; color: var(--muted-2); font-size: 10px; }
 .settings-card dd { margin: 0; color: var(--ink-soft); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.runtime-port-editor { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.runtime-port-editor input { width: 94px; min-height: 34px; padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink-soft); background: var(--surface); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; outline: none; }
+.runtime-port-editor input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus); }
+.runtime-port-editor input:disabled { color: var(--muted-2); background: var(--surface-soft); cursor: not-allowed; }
+.mini-text-button { min-height: 34px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--brand-hover); background: var(--surface); cursor: pointer; font-size: 12px; font-weight: 680; }
+.mini-text-button:hover:not(:disabled) { border-color: var(--brand); background: var(--brand-soft); }
+.mini-text-button:disabled { color: var(--muted-2); background: var(--surface-soft); cursor: not-allowed; }
 .safety-card ul { padding: 0; margin: 0; list-style: none; display: grid; gap: 12px; }
 .safety-card li { color: var(--muted); font-size: 13px; display: flex; align-items: center; }
 .safety-card li span { width: 20px; height: 20px; flex: 0 0 20px; margin-right: 9px; border-radius: 50%; color: var(--green); background: var(--green-soft); display: inline-grid; place-items: center; font-size: 12px; }

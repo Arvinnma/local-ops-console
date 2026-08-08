@@ -13,7 +13,7 @@ git rev-parse HEAD
 git remote -v
 git ls-remote forgejo refs/heads/main
 git ls-remote origin refs/heads/main
-git rev-parse 'v1.8.4^{}'
+git rev-parse 'v1.8.5^{}'
 ```
 
 Record these separately:
@@ -125,6 +125,14 @@ Use an isolated runtime directory. Do not stop production resources for this gat
 12. Confirm a menu-bar stop and verify `eventName`, `actionId`, `callPath`, `userIntentConfirmed`, source, reason, and timestamp in `runtime/process-lifecycle.json`.
 
 ## 6. Package and installed-runtime verification
+
+Before packaging, verify configurable portless access in an isolated catalog:
+
+1. Render the PF anchor with a non-default valid Caddy port and confirm both IPv4 and IPv6 rules use the selected value.
+2. Reject ports below `1024`, above `65535`, fractional values, Local Ops control-plane ports, and a port held by another listener.
+3. Keep the prior catalog and running Caddy configuration when render or reload fails.
+4. With portless access enabled, confirm the installed PF anchor exactly matches the configured Caddy port before reporting the feature active.
+5. Verify a mismatched anchor reports **Repair Portless Access** and never turns healthy SSH processes into a tunnel-liveness failure.
 
 Build without installing:
 

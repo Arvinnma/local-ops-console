@@ -2,7 +2,7 @@
 
 ## Supported build target
 
-Local Ops v1.8.4 ships an Apple Silicon (`arm64`) macOS package. Intel (`x64`) and universal packages are not part of the current release matrix.
+Local Ops v1.8.5 ships an Apple Silicon (`arm64`) macOS package. Intel (`x64`) and universal packages are not part of the current release matrix.
 
 Before describing a change as released, check [Authoritative Project Status](PROJECT_STATUS.md). It records the installed build, public GitHub/tag/artifact baseline, and private Forgejo/runtime baseline separately. A private post-release hotfix is not part of an older public tag merely because its App bundle still carries the same version number.
 
@@ -122,7 +122,7 @@ Output:
 
 ```text
 desktop/dist/mac-arm64/Local Ops.app
-desktop/dist/Local-Ops-1.8.4-arm64.dmg
+desktop/dist/Local-Ops-1.8.5-arm64.dmg
 ```
 
 To build, replace the app in Applications, re-sign ad hoc, verify the signature, and launch it:

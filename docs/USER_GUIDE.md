@@ -2,13 +2,13 @@
 
 [简体中文](USER_GUIDE.zh-CN.md) · [Project README](../README.md) · [Security](../SECURITY.md)
 
-This guide applies to Local Ops v1.8.4 on Apple Silicon macOS.
+This guide applies to Local Ops v1.8.5 on Apple Silicon macOS.
 
 ## 1. Install, update, and open
 
 ### Install
 
-1. Download `Local-Ops-1.8.4-arm64.dmg` from GitHub Releases.
+1. Download `Local-Ops-1.8.5-arm64.dmg` from GitHub Releases.
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch the app from Applications.
 
@@ -200,7 +200,7 @@ Caddy routes by `panel.localhost`, while quick links retain `/admin_abc`.
 
 ### Portless access
 
-Without portless access, links include `:19080`. Enabling it installs a root-owned LaunchDaemon, helper, and PF anchor that forward loopback port 80 to Caddy. The App requests administrator authorization once. It never opens port 80 on a LAN interface. The browser-only console cannot request this authorization.
+Without portless access, links include the configured Caddy internal port, which defaults to `:19080`. After disabling portless access, edit that port under **Settings → Runtime Settings**. Local Ops rejects privileged, reserved, conflicting, occupied, fractional, and out-of-range ports, then renders and reloads Caddy atomically. Re-enabling portless access installs a root-owned LaunchDaemon, helper, and dynamically rendered PF anchor that forward loopback port 80 to the selected Caddy port. The App requests administrator authorization for the system rule. It never opens port 80 on a LAN interface. The browser-only console cannot request this authorization.
 
 ## 8. Docker
 
@@ -279,8 +279,8 @@ Use the overflow menu for process logs or **Open Logs** in the menu-bar footer.
 - **A health check is red**: confirm the endpoint listens locally and returns a status below 500.
 - **An SSH tunnel fails**: inspect its last connection error and next retry time, then test the host in Terminal, verify the key path and permissions, confirm the local port is free, and check that the configured HTTP health URL works through the forward. For encrypted keys, confirm the Keychain passphrase indicator too.
 - **Keychain asks repeatedly**: unlock the macOS login Keychain and save the passphrase again. Local Ops intentionally does not cache plaintext in files.
-- **A local domain does not open**: verify Caddy and the target, check the configured path, and enable portless access if the URL omits `:19080`.
-- **Portless access cannot start**: another process may own local port 80. Disable that listener and retry from the App.
+- **A local domain does not open**: verify Caddy and the target, check the configured path, and include the current internal port unless portless access is enabled.
+- **Portless access cannot start**: another process may own local port 80, or the installed PF rule may be out of sync with the selected Caddy port. Disable the conflicting listener or use **Repair Portless Access** in the App.
 - **Docker is unavailable**: install/start Docker Desktop and wait for Engine readiness.
 - **A terminal action fails**: verify Terminal/iTerm2 is installed and allow Local Ops under System Settings → Privacy & Security → Automation.
 - **The UI is stale**: use Refresh or **Settings → Reload All Configuration**.

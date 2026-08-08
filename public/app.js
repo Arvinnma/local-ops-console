@@ -1,11 +1,11 @@
-import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.8.4";
-import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.8.4";
+import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.8.5";
+import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.8.5";
 import {
   tunnelDisplayState,
   tunnelFailureMessage,
   tunnelPrimaryAction
-} from "./tunnel-ui.js?v=1.8.4";
-import { bootstrapConfigChanged } from "./resource-sync.js?v=1.8.4";
+} from "./tunnel-ui.js?v=1.8.5";
+import { bootstrapConfigChanged } from "./resource-sync.js?v=1.8.5";
 
 const LANGUAGE_STORAGE_KEY = "local-ops-language";
 setLocale(normalizeLocale(localStorage.getItem(LANGUAGE_STORAGE_KEY)));
@@ -751,10 +751,17 @@ function renderSettings() {
   if (!ui.bootstrap) return;
   const settings = ui.bootstrap.config.settings;
   const publicPort = Number(settings.publicProxyPort || settings.proxyPort);
+  const proxyPortLocked = publicPort === 80;
+  const proxyPortEditor = window.localOpsDesktop?.setProxyPort
+    ? `<span class="runtime-port-editor">
+        <input id="proxy-port-input" type="number" min="1024" max="65535" step="1" value="${Number(settings.proxyPort)}" aria-label="${escapeAttribute(tr("Caddy 内部端口"))}"${proxyPortLocked ? " disabled" : ""}>
+        <button class="mini-text-button" id="proxy-port-save" type="button"${proxyPortLocked ? " disabled" : ""}>${tr("保存")}</button>
+      </span>`
+    : `127.0.0.1:${settings.proxyPort}`;
   document.querySelector("#settings-list").innerHTML = `
     <div><dt>网页控制台</dt><dd>127.0.0.1:${settings.consolePort}</dd></div>
     <div><dt>访问地址</dt><dd>${publicPort === 80 ? "*.localhost" : `*.localhost:${publicPort}`}</dd></div>
-    <div><dt>Caddy 内部端口</dt><dd>127.0.0.1:${settings.proxyPort}</dd></div>
+    <div><dt><span>Caddy 内部端口</span>${proxyPortLocked ? `<small>${tr("关闭无端口访问后可修改")}</small>` : ""}</dt><dd>${proxyPortEditor}</dd></div>
     <div><dt>Process Compose API</dt><dd>127.0.0.1:${settings.processComposePort}</dd></div>
     <div><dt>服务调度 API</dt><dd>127.0.0.1:${settings.workerComposePort}</dd></div>
     <div><dt>Caddy Admin API</dt><dd>127.0.0.1:${settings.caddyAdminPort}</dd></div>
@@ -766,8 +773,46 @@ function renderSettings() {
   });
   renderLanguageControls();
   renderPortlessAccess();
+  bindProxyPortEditor();
   updateSettingsMetrics();
   localizeDocument();
+}
+
+function bindProxyPortEditor() {
+  const input = document.querySelector("#proxy-port-input");
+  const button = document.querySelector("#proxy-port-save");
+  if (!input || !button || !window.localOpsDesktop?.setProxyPort) return;
+  button.addEventListener("click", saveProxyPort);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void saveProxyPort();
+    }
+  });
+}
+
+async function saveProxyPort() {
+  const input = document.querySelector("#proxy-port-input");
+  const button = document.querySelector("#proxy-port-save");
+  if (!input || !button || !window.localOpsDesktop?.setProxyPort) return;
+  const port = Number(input.value);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    toast(tr("Caddy 内部端口必须是 1024-65535 之间的整数"), "error");
+    input.focus();
+    return;
+  }
+  input.disabled = true;
+  button.disabled = true;
+  try {
+    await window.localOpsDesktop.setProxyPort(port);
+    await reloadBootstrap();
+    await refresh(true);
+    toast(tr("Caddy 内部端口已更新"));
+  } catch (error) {
+    input.disabled = false;
+    button.disabled = false;
+    toast(tr(error.message), "error");
+  }
 }
 
 function renderLanguageControls() {
@@ -960,7 +1005,9 @@ function renderPortlessAccess() {
     button.className = "secondary-button portless-disable-button";
   } else if (ui.portless.installed || ui.portless.configured) {
     status.textContent = "需要修复";
-    description.textContent = ui.portless.error || "系统转发规则没有生效，可以重新授权修复。";
+    description.textContent = ui.portless.error || (ui.portless.synchronized === false
+      ? "系统转发规则与 Caddy 内部端口不一致，请重新授权同步。"
+      : "系统转发规则没有生效，可以重新授权修复。");
     button.textContent = "修复无端口访问";
     button.className = "primary-button";
   } else {

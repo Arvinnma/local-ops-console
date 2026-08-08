@@ -28,7 +28,7 @@ Local Ops 把 Electron 桌面 App、浏览器控制台、Process Compose 和 Cad
 - Docker 功能可选；使用时需要安装 Docker Desktop
 - 系统自带 Terminal.app；iTerm2 为可选项
 
-v1.8.4 暂不提供 Intel（`x64`）安装包。
+v1.8.5 暂不提供 Intel（`x64`）安装包。
 
 ## 功能一览
 
@@ -49,7 +49,7 @@ v1.8.4 暂不提供 Intel（`x64`）安装包。
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Arvinnma/local-ops-console/releases/latest) 下载 `Local-Ops-1.8.4-arm64.dmg`。
+1. 从 [Releases](https://github.com/Arvinnma/local-ops-console/releases/latest) 下载 `Local-Ops-1.8.5-arm64.dmg`。
 2. 打开 DMG，把 **Local Ops** 拖到“应用程序”。
 3. 从“应用程序”启动 **Local Ops**。
 
@@ -63,7 +63,7 @@ v1.8.4 暂不提供 Intel（`x64`）安装包。
 
 ### 可选的无端口访问
 
-Caddy 默认监听 `127.0.0.1:19080`。设置页可以安装一个仅作用于本机回环地址的 macOS 规则，把本机 80 端口转发到 Caddy。macOS 只会要求一次管理员密码；启用后可直接访问 `http://openclaw.localhost`，不用再写 `:19080`。该规则可随时在设置中关闭并清理。
+Caddy 默认监听 `127.0.0.1:19080`。关闭无端口访问后，可以在“设置 → 运行设置”修改内部端口；Local Ops 会先校验端口，再重新生成配置并热加载 Caddy。重新启用无端口访问时，特权 PF 规则会按当前端口动态生成，把本机回环 80 端口转发到所选端口。之后可直接访问 `http://openclaw.localhost`，无需端口后缀；规则也可以在设置中修复、关闭和清理。
 
 ## 第一次使用
 
@@ -100,7 +100,7 @@ Local Ops.app / 浏览器
           │
           ├── Process Compose Core（控制台、Caddy、服务调度器）
           ├── Process Compose Worker（用户服务、SSH 隧道）
-          ├── Caddy（127.0.0.1:19080，可选回环 80 端口入口）
+          ├── Caddy（可配置回环端口，默认 19080；可选 80 端口入口）
           └── Docker CLI / Terminal.app / iTerm2（仅按需调用）
 ```
 
@@ -155,13 +155,13 @@ npm ci
 npm run dmg
 ```
 
-安装包输出到 `desktop/dist/Local-Ops-1.8.4-arm64.dmg`。打包步骤会把当前 Caddy 与 Process Compose 二进制复制进 App。
+安装包输出到 `desktop/dist/Local-Ops-1.8.5-arm64.dmg`。打包步骤会把当前 Caddy 与 Process Compose 二进制复制进 App。
 
 修改打包、原生 Helper、回环监听或 Electron 安全设置前，请先阅读[开发与发布文档](docs/DEVELOPMENT.md)。
 
 ## 发布验收
 
-v1.8.4 发布门禁覆盖：语法和单元测试、中英文静态文案覆盖、配置往返、API 安全校验、可信菜单栏操作与停止确认、期望状态保留、真实子进程对账、重复端口保护、进程树清理、服务生命周期与日志、SSH 网络门控与有限重试、完整域名入口检查、Caddy 路径路由、Docker 容器读取、加密私钥钥匙串集成、登录项静默启动、菜单栏重复恢复窗口、窄窗口浏览器 QA、App 签名与架构，以及挂载 DMG 的布局/签名检查。
+v1.8.5 发布门禁覆盖：语法和单元测试、Caddy/PF 动态端口同步、中英文静态文案覆盖、配置往返、API 安全校验、可信菜单栏操作与停止确认、期望状态保留、真实子进程对账、重复端口保护、进程树清理、服务生命周期与日志、SSH 网络门控与有限重试、完整域名入口检查、Caddy 路径路由、Docker 容器读取、加密私钥钥匙串集成、登录项静默启动、菜单栏重复恢复窗口、窄窗口浏览器 QA、App 签名与架构，以及挂载 DMG 的布局/签名检查。
 
 维护者在对外描述修复前必须先查看[项目权威状态](docs/PROJECT_STATUS.md)：公开 GitHub Release 与私有已验证运行基线可能处于不同提交。可重复执行的验收步骤见[发布与热修回归手册](docs/RELEASE_REGRESSION.md)。
 

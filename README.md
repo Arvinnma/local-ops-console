@@ -28,7 +28,7 @@ Local Ops combines an Electron desktop app, a browser console, Process Compose, 
 - Docker Desktop is optional and is required only for Docker controls
 - Terminal.app is built in; iTerm2 is optional
 
-Intel (`x64`) packages are not provided in v1.8.4.
+Intel (`x64`) packages are not provided in v1.8.5.
 
 ## What it manages
 
@@ -49,7 +49,7 @@ Intel (`x64`) packages are not provided in v1.8.4.
 
 ## Install
 
-1. Download `Local-Ops-1.8.4-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
+1. Download `Local-Ops-1.8.5-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch **Local Ops** from Applications.
 
@@ -63,7 +63,7 @@ The community DMG is ad-hoc signed and is not Apple-notarized. If macOS blocks t
 
 ### Optional portless access
 
-By default, Caddy listens at `127.0.0.1:19080`. Settings can install a loopback-only macOS rule that forwards local port `80` to Caddy. macOS asks for an administrator password once; afterward `http://openclaw.localhost` works without `:19080`. The rule can be disabled and removed from Settings.
+By default, Caddy listens at `127.0.0.1:19080`. The internal port is editable under **Settings → Runtime Settings** after portless access is disabled. Local Ops validates the new port, reloads Caddy, and uses that configured value when it generates the privileged PF rule. Enabling portless access forwards loopback port `80` to the selected Caddy port; afterward `http://openclaw.localhost` works without a port suffix. The rule can be repaired, disabled, and removed from Settings.
 
 ## First steps
 
@@ -100,7 +100,7 @@ Local control API (127.0.0.1:19090)
           |
           +-- Process Compose Core (console, Caddy, scheduler)
           +-- Process Compose Worker (user services and SSH tunnels)
-          +-- Caddy (127.0.0.1:19080; optional loopback port 80 entry)
+          +-- Caddy (configurable loopback port; default 19080; optional port 80 entry)
           +-- Docker CLI / Terminal.app / iTerm2 (only when requested)
 ```
 
@@ -159,13 +159,13 @@ npm ci
 npm run dmg
 ```
 
-The distributable is written to `desktop/dist/Local-Ops-1.8.4-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
+The distributable is written to `desktop/dist/Local-Ops-1.8.5-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
 
 Read [Development and Release Guide](docs/DEVELOPMENT.md) before changing packaging, native helpers, loopback bindings, or Electron security settings.
 
 ## Verification
 
-The v1.8.4 release gate covers syntax and unit tests, bilingual static-copy coverage, configuration round trips, API security checks, trusted menu-bar actions and stop confirmation, desired-state preservation, managed-child reconciliation, duplicate-port protection, process-tree cleanup, service lifecycle and logs, SSH network gating with bounded retries, complete domain-entry checks, Caddy path routing, Docker state reads, encrypted-key Keychain integration, silent login-item startup, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, and mounted-DMG layout/signature checks.
+The v1.8.5 release gate covers syntax and unit tests, dynamic Caddy/PF port synchronization, bilingual static-copy coverage, configuration round trips, API security checks, trusted menu-bar actions and stop confirmation, desired-state preservation, managed-child reconciliation, duplicate-port protection, process-tree cleanup, service lifecycle and logs, SSH network gating with bounded retries, complete domain-entry checks, Caddy path routing, Docker state reads, encrypted-key Keychain integration, silent login-item startup, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, and mounted-DMG layout/signature checks.
 
 Maintainers must consult [Authoritative Project Status](docs/PROJECT_STATUS.md) before describing a fix as public: the public GitHub release and the privately verified runtime can intentionally be at different commits. The repeatable verification sequence is in [Release and Hotfix Regression Manual](docs/RELEASE_REGRESSION.md).
 

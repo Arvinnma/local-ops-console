@@ -4,6 +4,7 @@ const { promisify } = require("node:util");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
+const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const {
@@ -13,6 +14,11 @@ const {
   shouldStartSilently
 } = require("./startup-mode.cjs");
 const { bringWindowToFront } = require("./window-lifecycle.cjs");
+const {
+  conflictingRuntimePort,
+  normalizeProxyPort,
+  renderPortlessAnchor
+} = require("./portless-config.cjs");
 
 const execFileAsync = promisify(execFile);
 const CONTROL_URL = "http://127.0.0.1:19090/";
@@ -26,6 +32,7 @@ const PORTLESS_LABEL = "com.arvin.localops.portless";
 const PORTLESS_DAEMON = `/Library/LaunchDaemons/${PORTLESS_LABEL}.plist`;
 const PORTLESS_HELPER = `/Library/PrivilegedHelperTools/${PORTLESS_LABEL}`;
 const PORTLESS_ANCHOR = "/etc/pf.anchors/com.arvin.localops";
+const PORTLESS_RENDERED_ANCHOR = path.join(INSTALL_DIR, "config", "portless.anchor");
 const PORTLESS_PROMPT_MARKER = path.join(INSTALL_DIR, "config", ".portless-prompted-v1");
 const LOG_DIR = path.join(os.homedir(), "Library", "Logs", "Local Ops");
 const LOG_FILE = path.join(LOG_DIR, "desktop.log");
@@ -1071,6 +1078,8 @@ function nativeErrorMessage(value) {
     ["没有找到该服务或 SSH 隧道", "The service or SSH tunnel was not found."],
     ["没有找到该终端操作", "The terminal action was not found."],
     ["没有找到该 Docker 容器", "The Docker container was not found."],
+    ["请先关闭无端口访问，再修改 Caddy 内部端口", "Disable portless access before changing the Caddy internal port."],
+    ["Caddy 内部端口必须是 1024-65535 之间的整数", "The Caddy internal port must be an integer between 1024 and 65535."],
     ["不支持的菜单栏操作", "Unsupported menu-bar action."]
   ]).get(message);
   if (exact) return exact;
@@ -1080,6 +1089,8 @@ function nativeErrorMessage(value) {
   if (match) return `Control-plane request failed (${match[1]}).`;
   match = message.match(/^系统配置失败：(.+)$/u);
   if (match) return `System configuration failed: ${match[1]}`;
+  match = message.match(/^端口 (\d+) 已被 (.+) 使用$/u);
+  if (match) return `Port ${match[1]} is already used by ${match[2]}.`;
   return message;
 }
 
@@ -1183,6 +1194,10 @@ function configureIpc() {
   ipcMain.handle("local-ops:set-portless-access", async (event, enabled) => {
     assertTrustedRenderer(event);
     return setPortlessAccess(Boolean(enabled));
+  });
+  ipcMain.handle("local-ops:set-proxy-port", async (event, port) => {
+    assertTrustedRenderer(event);
+    return setProxyPort(port);
   });
   ipcMain.handle("local-ops:login-item-status", async (event) => {
     assertTrustedRenderer(event);
@@ -1310,13 +1325,15 @@ function captureSessionState() {
 
 async function getPortlessStatus() {
   const catalog = readJsonFile(CATALOG_PATH, {});
-  const proxyPort = Number(catalog.settings?.proxyPort || 19080);
+  const proxyPort = normalizeProxyPort(catalog.settings?.proxyPort || 19080);
   const publicProxyPort = Number(catalog.settings?.publicProxyPort || proxyPort);
   const installed = [PORTLESS_DAEMON, PORTLESS_HELPER, PORTLESS_ANCHOR].every((file) => fs.existsSync(file));
-  const active = installed && await checkPortlessHealth();
+  const synchronized = installed && installedPortlessAnchorMatches(proxyPort);
+  const active = synchronized && await checkPortlessHealth();
   return {
     available: process.platform === "darwin",
     installed,
+    synchronized,
     configured: publicProxyPort === 80,
     active,
     proxyPort,
@@ -1341,10 +1358,16 @@ async function setPortlessAccess(enabled) {
       if (!fs.existsSync(source)) throw new Error("App 中缺少无端口访问组件，请重新安装 Local Ops");
     }
 
+    const catalog = readJsonFile(CATALOG_PATH, {});
+    const proxyPort = normalizeProxyPort(catalog.settings?.proxyPort || 19080);
+    const anchor = renderPortlessAnchor(fs.readFileSync(sources.anchor, "utf8"), proxyPort);
+    fs.mkdirSync(path.dirname(PORTLESS_RENDERED_ANCHOR), { recursive: true });
+    writeFileAtomic(PORTLESS_RENDERED_ANCHOR, anchor, 0o600);
+
     const command = [
       "/usr/bin/install -d -o root -g wheel -m 755 /Library/PrivilegedHelperTools",
       `/usr/bin/install -o root -g wheel -m 755 ${shellQuote(sources.helper)} ${shellQuote(PORTLESS_HELPER)}`,
-      `/usr/bin/install -o root -g wheel -m 644 ${shellQuote(sources.anchor)} ${shellQuote(PORTLESS_ANCHOR)}`,
+      `/usr/bin/install -o root -g wheel -m 644 ${shellQuote(PORTLESS_RENDERED_ANCHOR)} ${shellQuote(PORTLESS_ANCHOR)}`,
       `/usr/bin/install -o root -g wheel -m 644 ${shellQuote(sources.daemon)} ${shellQuote(PORTLESS_DAEMON)}`,
       `/bin/launchctl bootout system/${PORTLESS_LABEL} >/dev/null 2>&1 || true`,
       shellQuote(PORTLESS_HELPER),
@@ -1366,6 +1389,67 @@ async function setPortlessAccess(enabled) {
 
   await new Promise((resolve) => setTimeout(resolve, 350));
   return getPortlessStatus();
+}
+
+async function setProxyPort(value) {
+  const proxyPort = normalizeProxyPort(value);
+  const catalog = readJsonFile(CATALOG_PATH);
+  if (!catalog?.settings) throw new Error("没有找到 Local Ops 配置");
+
+  const previousProxyPort = normalizeProxyPort(catalog.settings.proxyPort || 19080);
+  const publicProxyPort = Number(catalog.settings.publicProxyPort || previousProxyPort);
+  if (proxyPort === previousProxyPort) {
+    return { proxyPort, publicProxyPort };
+  }
+  if (publicProxyPort === 80) {
+    throw new Error("请先关闭无端口访问，再修改 Caddy 内部端口");
+  }
+  const conflict = conflictingRuntimePort(catalog.settings, proxyPort);
+  if (conflict) throw new Error(`端口 ${proxyPort} 已被 ${conflict} 使用`);
+  await assertLoopbackPortAvailable(proxyPort);
+
+  const previousCatalog = `${JSON.stringify(catalog, null, 2)}\n`;
+  catalog.settings.proxyPort = proxyPort;
+  catalog.settings.publicProxyPort = proxyPort;
+  writeFileAtomic(CATALOG_PATH, `${JSON.stringify(catalog, null, 2)}\n`, 0o600);
+  try {
+    await renderInstalledConfig();
+    await reloadRuntimeConfiguration();
+  } catch (error) {
+    writeFileAtomic(CATALOG_PATH, previousCatalog, 0o600);
+    await renderInstalledConfig().catch(() => {});
+    await reloadRuntimeConfiguration().catch(() => {});
+    throw error;
+  }
+  return { proxyPort, publicProxyPort: proxyPort };
+}
+
+function installedPortlessAnchorMatches(proxyPort) {
+  try {
+    const resourceDir = app.isPackaged
+      ? path.join(process.resourcesPath, "portless")
+      : path.join(__dirname, "portless");
+    const template = fs.readFileSync(path.join(resourceDir, "com.arvin.localops.anchor"), "utf8");
+    return fs.readFileSync(PORTLESS_ANCHOR, "utf8") === renderPortlessAnchor(template, proxyPort);
+  } catch {
+    return false;
+  }
+}
+
+async function assertLoopbackPortAvailable(port) {
+  for (const host of ["127.0.0.1", "::1"]) {
+    await new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.unref();
+      server.once("error", (error) => {
+        server.close();
+        reject(new Error(error.code === "EADDRINUSE"
+          ? `端口 ${port} 已被其他程序使用`
+          : `无法使用 ${host}:${port}：${error.message}`));
+      });
+      server.listen({ host, port, exclusive: true }, () => server.close(resolve));
+    });
+  }
 }
 
 async function updatePublicProxyPort(port) {

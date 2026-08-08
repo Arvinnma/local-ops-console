@@ -2,13 +2,13 @@
 
 [English](USER_GUIDE.md) · [项目说明](../README.zh-CN.md) · [安全说明](../SECURITY.md)
 
-本文适用于 Local Ops v1.8.4 与 Apple Silicon macOS。
+本文适用于 Local Ops v1.8.5 与 Apple Silicon macOS。
 
 ## 1. 安装、升级与打开方式
 
 ### 安装
 
-1. 从 GitHub Releases 下载 `Local-Ops-1.8.4-arm64.dmg`。
+1. 从 GitHub Releases 下载 `Local-Ops-1.8.5-arm64.dmg`。
 2. 打开 DMG，把 **Local Ops** 拖到“应用程序”。
 3. 从“应用程序”启动 App。
 
@@ -200,7 +200,7 @@ Caddy 仍按 `panel.localhost` 路由，快捷入口会保留 `/admin_abc`。
 
 ### 无端口访问
 
-未启用时，链接会带 `:19080`。启用后，Local Ops 会安装 root 所有的 LaunchDaemon、Helper 和 PF anchor，把回环 80 端口转发到 Caddy。App 只在首次操作时请求管理员授权，不会监听局域网网卡。纯浏览器控制台无法发起这项系统授权。
+未启用时，链接会带上当前 Caddy 内部端口，默认是 `:19080`。先关闭无端口访问，即可在“设置 → 运行设置”修改端口。Local Ops 会拒绝特权端口、内部保留端口、已占用端口、小数和越界值，并在校验后原子写入配置、重新生成并热加载 Caddy。重新启用无端口访问时，Local Ops 会安装 root 所有的 LaunchDaemon、Helper，以及按当前端口动态生成的 PF anchor，把回环 80 端口转发到所选 Caddy 端口。App 会为系统规则请求管理员授权，但不会监听局域网网卡；纯浏览器控制台无法发起这项系统授权。
 
 ## 8. Docker
 
@@ -279,8 +279,8 @@ localops tui-core                        # Core Process Compose TUI
 - **健康检查异常**：确认端点在本机监听，并返回小于 500 的 HTTP 状态码。
 - **SSH 隧道失败**：查看卡片底部的连接错误；再在 Terminal 测试主机，确认私钥路径和权限、本地端口未占用、HTTP 健康地址经过该转发可访问。加密私钥还要确认页面显示钥匙串口令已保存。
 - **钥匙串反复询问**：解锁 macOS 登录钥匙串并重新保存口令。Local Ops 不会把明文缓存到文件。
-- **本地域名打不开**：检查 Caddy、转发目标和路径；URL 省略 `:19080` 时要确认无端口访问已启用。
-- **无端口访问失败**：本机 80 端口可能被其他进程占用，停止对应监听后从 App 重试。
+- **本地域名打不开**：检查 Caddy、转发目标和路径；未启用无端口访问时，URL 要带当前 Caddy 内部端口。
+- **无端口访问失败**：本机 80 端口可能被其他进程占用，或者 PF 规则与当前 Caddy 端口不同步。停止冲突监听，或从 App 点击“修复无端口访问”。
 - **Docker 不可用**：安装或启动 Docker Desktop，等待 Engine 就绪。
 - **终端操作失败**：确认 Terminal / iTerm2 已安装，并在“系统设置 → 隐私与安全性 → 自动化”允许 Local Ops。
 - **界面未更新**：点击刷新，或进入“设置 → 重新加载全部配置”。
