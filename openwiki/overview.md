@@ -56,13 +56,11 @@ Electron 的 `BrowserWindow` 明确设置 `nodeIntegration: false`、`contextIso
 
 浏览器响应由 `publicCatalog()` 统一经过 `publicSshResource()`：它删除 tunnel 和 SSH terminal task 的 `passphraseRef`，并以 `hasKeyPassphrase` 告知该资源是否配置了口令引用。新增会修改配置或进程状态的路由应放在 request handler 中非读取方法的 `assertMutationRequest()` 之后，使用既有 `validateInput()`/mutation 路径；若控制进程，还必须经 `assertKnownProcess()`，并保持 protected process 的网页 stop 禁止与 tray tunnel stop 的确认检查。
 
-## 本机安装、桌面与运维边界
+## 桌面壳与受限端口访问
 
-源码安装链由 `scripts/install.zsh` 实现：安装/定位 Node、Caddy、Process Compose，复制运行时，保留已有 catalog/token，构建 Keychain helper，渲染配置，并注册当前用户的 LaunchAgent。该 Agent 执行 `scripts/start-stack.zsh`：先渲染配置，随后以 `--address 127.0.0.1` 启动 core Process Compose。`scripts/opsctl.zsh` 是本机运维入口，分别连接 core 和 worker 的 loopback Process Compose API；其 `process` 子命令先从 bootstrap 获取 token 再调用控制面 API。
+`desktop/main.cjs` 是网页控制台的受隔离宿主，而非第二套控制 API。`configureIpc()` 只允许可信 renderer 调用 `desktop/preload.cjs` 暴露的固定方法；`createTray()` 与 `runTrayMutation()` 将可信托盘手势连同审计上下文发送给同一控制 API。隧道 stop 还要求确认，且服务端会拒绝缺少确认的 tray 请求；其会话语义由[生命周期页](lifecycle.md)定义。
 
-打包应用由 `desktop/main.cjs` 的 `ensureBundledBackend`、`installBundledBackend`、`installLaunchAgent` 与 `bootstrapLaunchAgent` 管理同一类本机后端安装与启动；`ensureControlPlane` 先探测 health，再 kickstart 或 bootstrap 用户 LaunchAgent。相关安装细节应以人工 [../docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md) 为准，本页不复制其叙事。
-
-可选的无端口访问是一个受限的本机特权面：`setPortlessAccess`、`setProxyPort`、`runElevatedShell` 管理 PF anchor/privileged helper；`desktop/portless-config.cjs` 的 `normalizeProxyPort` 仅接受 1024–65535，并以 `conflictingRuntimePort` 拒绝与 console、core/worker Process Compose、Caddy admin 端口冲突。模板必须同时替换 IPv4/IPv6 loopback 的端口占位符。此能力不改变控制面仍以 loopback 为边界的事实。
+可选的无端口访问仍是受限的本机特权面：`setPortlessAccess`、`setProxyPort`、`runElevatedShell` 管理 PF anchor/privileged helper；`desktop/portless-config.cjs` 的 `normalizeProxyPort` 仅接受 1024–65535，并以 `conflictingRuntimePort` 拒绝与 console、core/worker Process Compose、Caddy admin 端口冲突。模板必须同时替换 IPv4/IPv6 loopback 的端口占位符。此能力不改变控制面仍以 loopback 为边界的事实。
 
 ## 聚焦测试与最小验证
 

@@ -26,7 +26,7 @@
 ## 验证结果
 
 - `project-foundation check`：通过。
-- OpenWiki 代码哈希：`a52071269e8404ee12e028ac3237c4614f95a0e5fa65f462ce3720b087203134`，状态 `no-op`。
+- OpenWiki 代码哈希：`825d4d757b93745a76dfe100f9137e3e3ef92fb948006babfa2e4c4330ceb6`，状态 `no-op`。
 - `npm run check`：通过。
 - `npm test`：90/90 通过。
 - `git diff --check`：通过。
@@ -45,5 +45,5 @@
 
 - 旧目录保持原样，不删除、不重命名。
 - 如果新副本验证失败，停止使用新路径并回到迁移前目录与提交 `d3a9ddaa2a7ae9b3fffc922741a60e5a58f2d4ef`。
-- OpenWiki 接受前备份：`/Users/arvin/.local/state/project-foundation/backups/local-ops-console/openwiki-20260809T061537609155`。
-- 已接受候选：`/Users/arvin/.local/state/project-foundation/openwiki-candidates/local-ops-console/20260809T055433524456`。
+- 最终 OpenWiki 接受前备份：`/Users/arvin/.local/state/project-foundation/backups/local-ops-console/openwiki-20260809T063200500964`。
+- 最终已接受候选：`/Users/arvin/.local/state/project-foundation/openwiki-candidates/local-ops-console/20260809T062514831109`。

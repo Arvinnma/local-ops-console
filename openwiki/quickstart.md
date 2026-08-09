@@ -1,46 +1,52 @@
 ---
 type: 快速开始
 title: Local Ops 代码百科导航
-description: 面向安全修改的 Local Ops 代码地图：从意图定位到控制面、配置、生命周期、SSH 隧道、桌面壳和验证。
+description: 面向安全修改的 Local Ops 代码地图：从变更意图定位到控制面、配置、生命周期、SSH 隧道、桌面壳和聚焦验证。
 tags: [navigation, architecture, testing]
+openwiki:
+  roles: [repository, workflow, testing]
+  source_paths: [package.json, src/server.mjs, src/config.mjs, src/process-lifecycle.mjs, src/tunnel-health.mjs, desktop/main.cjs]
+  test_paths: [tests/config.test.mjs, tests/process-lifecycle.test.mjs, tests/tunnel-health.test.mjs]
+  validation_commands: [npm run check, npm test]
 ---
 
 # Local Ops 代码百科导航
 
-这是 Local Ops 的代码快照百科。项目是 macOS 本机服务、SSH 隧道、反向代理、Docker 和终端任务的控制台；网页控制面、Process Compose worker、Caddy 与 Electron 壳的关系在[项目总览与控制面边界](overview.md)中建立。这里不替代人工叙事：使用说明见 [../docs/USER_GUIDE.md](../docs/USER_GUIDE.md)，开发与打包说明见 [../docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md)，发布状态见 [../docs/PROJECT_STATUS.md](../docs/PROJECT_STATUS.md)。
+这是 Local Ops 的代码快照百科。项目以浏览器控制面和 Electron 宿主协调本机服务、SSH 隧道、反向代理、Docker 与终端任务；组件关系和 HTTP 边界见[项目总览与控制面边界](overview.md)。本百科只记录代码与测试可证明的内容；使用、开发和项目状态等人工叙事分别见 [../docs/USER_GUIDE.md](../docs/USER_GUIDE.md)、[../docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md) 与 [../docs/PROJECT_STATUS.md](../docs/PROJECT_STATUS.md)。
 
-## 代码地图
+## 阅读地图
 
 | 页面 | 正典问题 | 主要源码 |
 | --- | --- | --- |
-| [项目总览与控制面边界](overview.md) | 网页如何调用 API，哪些 Host/Origin/token/CSP 规则保护本机控制面 | `src/server.mjs`、`public/app.js`、`public/index.html`、`desktop/main.cjs` |
-| [Catalog 配置模型与运行时渲染](configuration.md) | 资源如何验证、导入导出、生成 core/worker Compose 和 Caddy | `src/config.mjs`、`config/catalog.example.json` |
+| [项目总览与控制面边界](overview.md) | 网页如何调用 API，以及 Host、Origin、token、CSP、Electron 隔离和受限端口访问如何保护控制面 | `src/server.mjs`、`public/app.js`、`public/index.html`、`desktop/main.cjs`、`desktop/preload.cjs`、`desktop/portless-config.cjs` |
+| [Catalog 配置模型与运行时渲染](configuration.md) | 资源如何验证、导入导出，并生成 core/worker Process Compose 与 Caddy 配置 | `src/config.mjs`、`config/catalog.example.json` |
 | [进程、服务与会话生命周期](lifecycle.md) | 如何审计动作、监督带健康 URL 的服务、停止进程树和恢复会话 | `src/process-lifecycle.mjs`、`src/managed-service.mjs`、`scripts/run-managed-service.mjs` |
-| [SSH 隧道、网络门控与健康状态](tunnels.md) | SSH、Keychain 引用、网络 gate、健康分层和 retry 语义 | `src/tunnel-network.mjs`、`src/tunnel-health.mjs`、`scripts/run-managed-tunnel.mjs` |
-| [Electron 桌面壳、本机安装与受限端口访问](desktop.md) | 窗口/托盘、LaunchAgent、本机 `opsctl` 和受限 PF 能力 | `desktop/`、`scripts/install.zsh`、`scripts/start-stack.zsh`、`scripts/opsctl.zsh` |
+| [SSH 隧道、网络门控与健康状态](tunnels.md) | SSH、Keychain 引用、网络 gate、分层健康与 retry 语义 | `src/tunnel-network.mjs`、`src/tunnel-health.mjs`、`scripts/run-managed-tunnel.mjs` |
+| [Electron 桌面壳与受限端口访问](desktop.md) | 窗口/托盘可信动作、窄 IPC 面与可选 loopback 端口重定向 | `desktop/main.cjs`、`desktop/preload.cjs`、`desktop/tray.js`、`desktop/portless-config.cjs` |
 
 ## 按修改意图定位
 
-| 意图 | 先读 | 实现切入点 | 聚焦测试 | 最小验证 |
-| --- | --- | --- | --- | --- |
-| 新增/修改 HTTP API | [总览](overview.md) | `src/server.mjs` 的 request handler、`assertMutationRequest`、`publicCatalog` | `tests/smoke.mjs`、`tests/process-lifecycle.test.mjs` | `npm test` |
-| 新增资源字段或调整 route/配置 | [配置](configuration.md) | `normalize*`、`validateCatalog`、`renderAll`、`enqueueMutation` | `tests/config.test.mjs` | `node --test tests/config.test.mjs` |
-| 修改服务启动、健康或停止 | [生命周期](lifecycle.md) | `processAction`、`run-managed-service.mjs`、`managed-service.mjs`、`service-health.mjs` | `tests/managed-service.test.mjs`、`tests/service-health.test.mjs` | `node --test tests/managed-service.test.mjs tests/service-health.test.mjs` |
-| 修改会话恢复或动作审计 | [生命周期](lifecycle.md) | `process-lifecycle.mjs`、`captureLastSessionState`、`applyAppStartupActions` | `tests/process-lifecycle.test.mjs` | `node --test tests/process-lifecycle.test.mjs` |
-| 修改 SSH 或隧道健康/retry | [SSH 隧道](tunnels.md) | `renderSshCommand`、`run-managed-tunnel.mjs`、`tunnel-network.mjs`、`tunnel-health.mjs` | `tests/tunnel-network.test.mjs`、`tests/tunnel-health.test.mjs`、`tests/tunnel-ui.test.mjs` | 对应 `node --test`，再 `npm test` |
-| 修改 Electron/托盘/启动呈现 | [桌面壳](desktop.md) | `desktop/main.cjs`、`desktop/preload.cjs`、`desktop/tray.js`、`desktop/startup-mode.cjs` | `tests/tray-action.test.mjs`、`tests/window-lifecycle.test.mjs`、`tests/startup-mode.test.mjs` | 对应 `node --test` |
-| 修改无端口访问或代理端口验证 | [桌面壳](desktop.md) 与[配置](configuration.md) | `desktop/portless-config.cjs`、`setPortlessAccess`、`setProxyPort` | `tests/portless-config.test.mjs` | `node --test tests/portless-config.test.mjs` |
+| 变更区域或意图 | 相关页面 | 精确源码入口 | 重要符号或类型 | 聚焦测试 | 最小验证命令 |
+| --- | --- | --- | --- | --- | --- |
+| 新增或修改 HTTP API | [总览](overview.md) | `src/server.mjs`、`public/app.js` | `assertMutationRequest`、`isAllowedHost`、`publicCatalog`、`request` | `tests/smoke.mjs`、`tests/process-lifecycle.test.mjs` | `npm test` |
+| 新增资源字段、route 或配置 | [配置](configuration.md) | `src/config.mjs` | `normalizeService`、`normalizeTunnel`、`validateCatalog`、`renderAll`、`enqueueMutation` | `tests/config.test.mjs` | `node --test tests/config.test.mjs` |
+| 修改服务启动、健康或停止 | [生命周期](lifecycle.md) | `src/managed-service.mjs`、`src/service-health.mjs`、`scripts/run-managed-service.mjs` | `reconcileManagedServiceProcess`、`stopManagedServiceRuntime`、`enrichServiceProcess` | `tests/managed-service.test.mjs`、`tests/service-health.test.mjs` | `node --test tests/managed-service.test.mjs tests/service-health.test.mjs` |
+| 修改会话恢复或动作审计 | [生命周期](lifecycle.md) | `src/process-lifecycle.mjs`、`src/server.mjs` | `recordProcessActionRequest`、`reconcileRememberedProcessIds`、`captureLastSessionState` | `tests/process-lifecycle.test.mjs` | `node --test tests/process-lifecycle.test.mjs` |
+| 修改 SSH、网络检查或隧道健康 | [SSH 隧道](tunnels.md) | `src/tunnel-network.mjs`、`src/tunnel-health.mjs`、`scripts/run-managed-tunnel.mjs` | `resolveSshEndpoint`、`enrichTunnelProcess`、`probeTunnelReadiness` | `tests/tunnel-network.test.mjs`、`tests/tunnel-health.test.mjs`、`tests/tunnel-ui.test.mjs` | `node --test tests/tunnel-network.test.mjs tests/tunnel-health.test.mjs tests/tunnel-ui.test.mjs` |
+| 修改窗口、托盘或受限端口访问 | [总览](overview.md) | `desktop/main.cjs`、`desktop/preload.cjs`、`desktop/tray.js`、`desktop/portless-config.cjs` | `configureIpc`、`assertTrustedRenderer`、`setPortlessAccess`、`normalizeProxyPort` | `tests/tray-action.test.mjs`、`tests/window-lifecycle.test.mjs`、`tests/portless-config.test.mjs` | `node --test tests/window-lifecycle.test.mjs tests/tray-action.test.mjs tests/portless-config.test.mjs` |
 
-## 基线命令
+## 验证层级
 
-`package.json` 要求 Node `>=22.12.0`。`npm run check` 对列出的 Node/Electron/前端文件做语法检查；`npm test` 运行 `tests/*.test.mjs`；`npm run test:smoke` 是需要本机运行控制栈的实例检查；`npm run test:all` 组合更广的检查。选择最窄的行为测试起步，只有改动跨越多个系统时才扩大范围。
+`package.json` 要求 Node `>=22.12.0`。先用表中的 `node --test` 命令验证受影响行为；`npm run check` 覆盖列出的 Node、前端和 Electron 文件语法，`npm test` 运行 `tests/*.test.mjs`。`npm run test:smoke` 需要运行中的本机控制栈且会创建与清理临时资源，仅当变更跨越真实 API、编排或反代边界时才运行；`npm run test:all` 还包含 Keychain 与 smoke 检查，不是普通代码变更的默认验证。
 
 ## 不变量速查
 
-- 控制 API 和反向代理目标保持 loopback；新增变更 API 必须复用 Host、token 和 Origin 边界。
-- catalog 改动经验证、串行 mutation、重新渲染和运行时应用；失败要维持既有回滚语义。
+- 控制 API、反向代理目标与 SSH 监听保持 loopback；新增变更 API 必须复用 Host、token 和 Origin 边界。
+- catalog 变更必须经过验证、串行 mutation、重新渲染和运行时应用；失败维持既有回滚语义。
 - 生命周期的 desired state 不能被短暂 observed stop 覆盖；托盘停止必须具有确认和审计上下文。
-- 隧道的 SSH liveness、转发应用 readiness、域名入口 readiness 是不同信号；后两者失败不应直接终止健康 SSH。
-- Electron renderer 保持 sandbox/context isolation；preload 只增加明确的窄 IPC 面。
+- 隧道的 SSH liveness、转发应用 readiness 与域名入口 readiness 是不同信号；后两者失败不应直接终止健康 SSH。
+- Electron renderer 保持 sandbox/context isolation；preload 只能增加明确且窄的 IPC 面。
 
-本次没有源码证据受阻而需要列入 Backlog 的模块。
+## Backlog
+
+当前源码与测试覆盖的主要系统均已有正典页面；没有可由现有证据准确展开的待办项。

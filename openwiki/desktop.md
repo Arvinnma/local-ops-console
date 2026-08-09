@@ -1,13 +1,13 @@
 ---
 type: 桌面运行时
-title: Electron 桌面壳、本机安装与受限端口访问
-description: Electron 窗口和托盘、打包后端与 LaunchAgent、本机 opsctl 运维，以及可选 PF 端口访问边界。
-tags: [electron, macos, launchd, tray, portless]
+title: Electron 桌面壳与受限端口访问
+description: Electron 窗口和托盘可信动作、受隔离的窄 IPC 面，以及可选 PF loopback 端口重定向边界。
+tags: [electron, macos, tray, portless]
 ---
 
-# Electron 桌面壳、本机安装与受限端口访问
+# Electron 桌面壳与受限端口访问
 
-`desktop/main.cjs` 是 Electron 主进程入口。它不是业务控制 API 的第二套实现：启动时创建窗口/托盘并连接固定控制面 URL，网页业务请求仍由 `src/server.mjs` 处理，见[项目总览](overview.md)。本页聚焦桌面主进程的安全、安装启动边界、托盘意图审计和可选本机端口访问。
+`desktop/main.cjs` 是 Electron 主进程入口。它不是业务控制 API 的第二套实现：启动时创建窗口/托盘并连接固定控制面 URL，网页业务请求仍由 `src/server.mjs` 处理，见[项目总览](overview.md)。本页聚焦桌面主进程的安全、托盘意图审计和可选本机端口访问。
 
 ## 窗口、连接与最小桥接
 
@@ -16,7 +16,7 @@ tags: [electron, macos, launchd, tray, portless]
 | 面 | 符号 | 边界 |
 | --- | --- | --- |
 | renderer 安全 | `createMainWindow`、`configureSecurity` | 无 Node integration，隔离上下文和 sandbox；所有权限请求拒绝；禁止 webview。外部窗口/导航只有安全 URL 可交给系统 shell。 |
-| 控制面连接 | `connectControlPlane`、`ensureControlPlane` | 先 health check；需要时确保本机后端，随后对当前用户的 LaunchAgent kickstart 或 bootstrap。失败显示离线页并安排重连。 |
+| 控制面连接 | `connectControlPlane`、`ensureControlPlane` | 先 health check；不可达时显示离线页并安排重连。控制面安装与运维步骤不在本页展开。 |
 | preload | `desktop/preload.cjs` | `window.localOpsDesktop` 仅暴露 portless、登录项、导入导出文件与 tray panel 固定方法；没有任意命令执行接口。 |
 | 启动呈现 | `desktop/startup-mode.cjs` | 仅 packaged macOS 的登录项或 `--local-ops-silent-start` 可静默；静默呈现会在 `createMainWindow()` 的 `ready-to-show` 时保持窗口隐藏，直到 `showMainWindow()` 调用 `startupPresentation.reveal()`；其他场景显示正常窗口。 |
 
@@ -26,25 +26,13 @@ tags: [electron, macos, launchd, tray, portless]
 
 停止资源比其他托盘操作多一道约束：`confirmTrayProcessStop()` 先显示原生确认；控制面仍在 `src/server.mjs` 拒绝缺少 `userIntentConfirmed` 的 tunnel stop。生命周期模块对未确认 stop 的会话保存规则见[生命周期页](lifecycle.md)。这两层限制避免 renderer 构造一次非用户手势的 stop 即改变 remembered tunnel 状态。
 
-## 两条本机安装与启动链
+## 本机安装与运维资料
 
-### 源码安装链
-
-`scripts/install.zsh` 定位或安装 Homebrew 的 Node、Caddy 和 Process Compose，创建本机安装目录，复制运行时文件但保留现有 catalog/token，首次时从示例创建 catalog 并用权限受限方式生成 token。它构建 Keychain helper、运行 `scripts/render-config.mjs`、从 `launchd/com.arvin.localops.plist.template` 渲染 plist，链接到当前用户 LaunchAgents 并 bootstrap。若标准 Homebrew bin 可写，再链接 `localops` 到 `scripts/opsctl.zsh`。
-
-`launchd` 启动的 `scripts/start-stack.zsh` 定位 Node/Process Compose，设置本机二进制与 no-proxy 环境，渲染配置，然后以 loopback address、token file、生成 core 配置和有序关闭参数执行 Process Compose。此为本机用户级服务链，不是远端调度机制。
-
-`opsctl.zsh` 的界面是 `status`、`start`、`stop`、`restart`、`logs`、`tui`、`tui-core`、`process`、`open`。它对 core/worker 都使用 `--address 127.0.0.1`；`process` 动作从 bootstrap 读取 token 后调用控制面，因此仍受 API 的已知进程与保护规则约束。其日志无进程参数时读取运行时 Process Compose 日志。
-
-### 打包应用链
-
-Electron 的 `ensureBundledBackend()`、`installBundledBackend()`、`installLaunchAgent()`、`bootstrapLaunchAgent()` 管理打包资源到用户安装位置、保留用户数据并安装/启动相应 LaunchAgent。`installBundledBackend()` 用 bundle manifest 的 `version`/`builtAt` 与已安装 manifest、以及 `bin`/`public`/`scripts`/`src` 是否缺失决定是否同步；只替换这些应用拥有的目录。`ensureUserConfiguration()` 始终更新示例，但仅在缺失时创建用户 catalog 和随机 token，并将二者设为 `0600`。打包 App 必须由 `assertInstalledApplicationLocation()` 确认位于 `/Applications` 或当前用户 Applications；`ensureControlPlane()` 不会假设桌面窗口本身就是后端：只有 health 不通时才尝试该启动链。
-
-`renderLaunchAgent()` 生成的用户 Agent 使用安装目录为工作目录，运行 `scripts/start-stack.zsh`，在加载时启动，`SuccessfulExit=false` 时保持重启且 throttle 为 5 秒；环境显式指定安装目录、Electron-as-Node、Process Compose、Caddy、Keychain helper 与 AskPass，标准输出/错误进入安装目录下的 runtime 日志。对打包/原生 helper 变更，应同时检查这些符号与人工 [../docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md)，而不要把人工运行手册复制到此处。
+安装、打包与运维步骤属于人工叙事层；需要这些资料时阅读 [../docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md)，不要在此代码快照页复制或推导操作流程。与桌面变更直接相关的实现边界仍在本页其余章节：桌面壳只能连接 loopback 控制面，且不会把 renderer 变成通用系统权限通道。
 
 ## 可选无端口访问：特权范围与冲突规则
 
-`setPortlessAccess()`、`setProxyPort()` 和 `runElevatedShell()` 是 Electron 主进程中的受限特权面。启用时，主进程渲染本地 anchor，再经管理员授权安装 root:wheel 的 helper、anchor 与 system daemon，bootstrap/kickstart daemon，最后将 `publicProxyPort` 更新为 80；禁用时 bootout daemon、清 PF anchor 并删除三项特权文件，再将 public port 恢复为 Caddy proxy port。`getPortlessStatus()` 只有在文件存在、anchor 与当前 proxy port 同步且健康检查通过时才报告 active；授权取消或规则安装后 80 不连通都作为失败处理。规则仅将 loopback IPv4/IPv6 的端口 80 重定向到配置的 Caddy proxy port；控制面、Caddy admin 和 worker API 仍是独立 loopback 端口。
+`setPortlessAccess()`、`setProxyPort()` 和 `runElevatedShell()` 是 Electron 主进程中的受限特权面。启用时，主进程在管理员授权下渲染并应用本地 PF anchor，随后将 `publicProxyPort` 更新为 80；禁用时清除该 PF anchor 并将 public port 恢复为 Caddy proxy port。`getPortlessStatus()` 只有在 anchor 与当前 proxy port 同步且健康检查通过时才报告 active；授权取消或规则安装后 80 不连通都作为失败处理。规则仅将 loopback IPv4/IPv6 的端口 80 重定向到配置的 Caddy proxy port；控制面、Caddy admin 和 worker API 仍是独立 loopback 端口。
 
 `normalizeProxyPort()` 只接受 1024–65535 的整数；`conflictingRuntimePort()` 拒绝与 `consolePort`、`processComposePort`、`workerComposePort`、`caddyAdminPort` 重合；`renderPortlessAnchor()` 要求模板存在 `{{PROXY_PORT}}`。因此改端口时必须先验证这些约束，再更新运行时设置；不可用或不健康的特权资源不能被当作网页控制面已经对外开放。
 
