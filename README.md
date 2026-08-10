@@ -180,3 +180,15 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 ## Community
 
 - **[linux.do](https://linux.do)** — a thriving developer community.
+
+<!-- PROJECT-FOUNDATION:START v1 -->
+## Project Foundation
+
+- Project ID: `local-ops-console`
+- Canonical source workspace: `/Users/arvin/Documents/AI/codex/local-ops-console`
+- Maintainer entry: [AGENTS.md](AGENTS.md)
+- External usage contract: [USAGE.md](USAGE.md)
+- Current source, release, private-remote, and installed-runtime boundaries: [docs/current-state.md](docs/current-state.md)
+
+The repository is the source of truth. m-wiki and OpenWiki are rebuildable browsing views and do not replace project-owned documentation.
+<!-- PROJECT-FOUNDATION:END v1 -->

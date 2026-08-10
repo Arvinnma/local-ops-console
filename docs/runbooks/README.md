@@ -3,25 +3,38 @@
 ## 日常只读诊断
 
 ```bash
+proxy_on >/dev/null 2>&1
 localops status
 localops logs
+curl --fail --silent --show-error http://127.0.0.1:19090/api/health
 ```
 
-不要因界面显示“已连接”就断言链路正常；同时核对真实进程、回环监听和相应 HTTP/SSH 结果。
+不要因界面显示“已连接”就断言链路正常；还要核对真实进程、回环监听、SSH/TCP 状态及相应 HTTP readiness。
 
 ## 源码验证
 
 ```bash
+cd /Users/arvin/Documents/AI/codex/local-ops-console
+proxy_on >/dev/null 2>&1
 npm run check
 npm test
 git diff --check
 ```
 
-## 深度维护入口
+原生钥匙串相关改动再按[测试入口](../testing/README.md)构建临时 Helper 并运行集成测试。
 
-- 构建、安装、原生钥匙串和浏览器检查：[[../DEVELOPMENT]]
-- 发布、热修、冷启动、SSH/readiness 和恢复：[[../RELEASE_REGRESSION]]
-- 已安装、公开与私有三类基线：[[../PROJECT_STATUS]]
-- 安全边界：[[../../SECURITY]]
+## 构建与发布入口
 
-任何覆盖 `~/.local/share/local-ops` 或 `/Applications/Local Ops.app` 的操作都可能重启控制面。操作前必须记录运行资源和恢复点，完成后按回归手册验证；仅迁移源码目录时不得触碰安装副本。
+- 依赖、Electron、钥匙串和 DMG 构建：[开发与发布指南](../DEVELOPMENT.md)
+- 冷启动、SSH/readiness、安装和 Release 强制门禁：[发布与热修回归手册](../RELEASE_REGRESSION.md)
+- 安装、公开 Release、私有远端和源码基线：[PROJECT_STATUS](../PROJECT_STATUS.md) 与[当前状态](../current-state.md)
+- 安全边界：[SECURITY.md](../../SECURITY.md)
+
+只生成 DMG 时使用 `npm run build:dmg`。`scripts/build-app.zsh` 会替换已安装 App；`scripts/install.zsh` 会写入后台和 LaunchAgent。两者都必须获得单独授权，并在执行前记录运行 PID、监听和恢复点。
+
+## 回滚原则
+
+- 源码修改：保留用户改动，不使用 `git reset --hard`；从已记录提交和差异中做最小回滚。
+- Release：标签和已发布制品不原位替换，发布修复版本。
+- 安装版：先备份 catalog、会话和运行证据；具体恢复按回归手册执行。
+- 源码迁移：恢复点见[迁移交接](../handoffs/2026-08-09-source-migration.md)。

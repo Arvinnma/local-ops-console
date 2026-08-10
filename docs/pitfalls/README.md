@@ -1,11 +1,19 @@
 # 踩坑记录
 
-记录真实发生的问题、症状、根因、修复方法和防复发验证，按主题组织。
+## SSH 与应用 readiness
 
-已知高风险点：
+- HTTP `401/403` 只证明受保护入口已应答，不能证明用户认证成功；它们在本项目的完整域名入口检查中属于可达结果。
+- 回环 TCP listener 只能证明隧道存活，不能证明远端应用可用。
+- 带 `ProxyJump` / `ProxyCommand` 的 SSH 别名应由 OpenSSH 管理完整链路，不能直接探测最终回环 HostName/Port 后伪造成功或失败。
+- HTTP 超时或 `5xx` 只能降级应用 readiness，不能杀死仍健康的 SSH 进程。详细矩阵见 [RELEASE_REGRESSION.md](../RELEASE_REGRESSION.md)。
 
-- HTTP `401/403` 只能证明受保护入口已应答，不能证明用户认证成功。
-- 回环 TCP 监听只能证明隧道存活，不能证明远端应用可用。
-- 带 `ProxyJump` / `ProxyCommand` 的 SSH 别名必须交给 OpenSSH 判断完整链路，不能只探测最终回环端点。
-- 覆盖安装后台会重启控制面，并可能重启 Worker SSH 进程；应避开正在进行的传输。
-- 详细症状、验证矩阵和恢复步骤见 [[../PROJECT_STATUS]] 与 [[../RELEASE_REGRESSION]]。
+## 源码、安装与发布
+
+- `scripts/build-app.zsh` 名称看似“构建”，实际会退出并覆盖 `/Applications/Local Ops.app`；普通打包应使用 `npm run build:dmg`。
+- GitHub `main`、Forgejo `main`、Release 标签和安装 App 可能不同。只看 `package.json` 或一个远端会得出错误结论。
+- 目标目录可能已经包含历史任务、依赖和 DMG。直接递归复制会把数 GB 可再生成内容带入新项目；先做冲突清单，再只迁移跟踪文件。
+- m-wiki 入口可解析只代表浏览注册正确；OpenWiki 是否当前应以 `project-foundation wiki check` 为准。保留的候选目录本身不等于当前快照过期。
+
+## 生产边界
+
+覆盖后台会重启控制面，并可能重启 Worker SSH 进程。源码迁移、文档维护和只读检查不得借机运行安装脚本；发布或安装前按 [PROJECT_STATUS.md](../PROJECT_STATUS.md) 与回归手册留出传输窗口。
