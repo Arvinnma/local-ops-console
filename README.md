@@ -190,5 +190,5 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 - External usage contract: [USAGE.md](USAGE.md)
 - Current source, release, private-remote, and installed-runtime boundaries: [docs/current-state.md](docs/current-state.md)
 
-The repository is the source of truth. m-wiki and OpenWiki are rebuildable browsing views and do not replace project-owned documentation.
+The repository is the source of truth. m-wiki is a rebuildable navigation view and does not replace project-owned documentation.
 <!-- PROJECT-FOUNDATION:END v1 -->

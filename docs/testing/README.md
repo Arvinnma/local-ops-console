@@ -47,7 +47,7 @@ LOCAL_OPS_KEYCHAIN_HELPER=/tmp/local-ops-keychain-test npm run test:keychain
 ## 2026-08-10 迁移收尾复验
 
 - `project-foundation check`、`doctor`：通过，m-wiki 注册和项目入口可解析。
-- `project-foundation wiki check`：`stale`；本次 Foundation 文档改变输入哈希，既有已接受快照保留，但本轮未获 OpenWiki 更新授权。
+- 2026-08-10 曾记录代码百科输入为 `stale`；该能力现已退役，不再是测试或发布门禁。
 - `project-foundation review-docs`：提交前因受审文档差异按设计返回 `review-needed`；提交后重新运行并记录真实结果。
 - `npm run check`：通过。
 - `npm test`：全量单元/回归测试通过。

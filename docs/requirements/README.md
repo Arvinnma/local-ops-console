@@ -17,7 +17,7 @@
 - 不覆盖原有 README、中文 README 或项目文档正文；Project Foundation 只维护各文档的唯一受控区和新增治理文档。
 - 旧仓库保留且迁移后不继续修改。
 - 源码迁移不触碰安装版、运行数据、日志或现有进程。
-- 迁移、m-wiki 注册、OpenWiki 接受、Git 提交、远端推送、发布和安装分别授权。
+- 迁移、Git 提交、远端推送、Release 发布和安装分别遵循当前任务授权；Git 推送成功后按 Project Foundation 契约自动登记或校验 m-wiki。
 
 ## 证据要求
 

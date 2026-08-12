@@ -34,7 +34,7 @@
 - `scripts/build-app.zsh` 会退出、覆盖并重新打开 `/Applications/Local Ops.app`，不是普通构建命令；只生成 DMG 时使用 `npm run build:dmg`。
 - 控制 API、SSH 监听和反向代理目标必须保持在回环地址。真实 catalog、Token、私钥、口令、钥匙串内容和运行日志不得进入仓库。
 - GitHub、Forgejo、Release 标签和当前安装版是独立基线；对外表述前必须分别核验。
-- m-wiki 是可重建浏览层，项目文件仍是事实源。OpenWiki 更新、接受、外部注册、Git 提交、推送、发布和安装分别需要相应授权。
+- m-wiki 是可重建浏览层，项目文件仍是事实源。Git 提交、推送、Release 发布和安装分别遵循当前任务授权；Git 推送成功后按 Project Foundation 契约自动登记或校验 m-wiki。
 
 ## 验证基线
 

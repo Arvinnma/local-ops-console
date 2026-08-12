@@ -12,7 +12,7 @@
 - `scripts/build-app.zsh` 名称看似“构建”，实际会退出并覆盖 `/Applications/Local Ops.app`；普通打包应使用 `npm run build:dmg`。
 - GitHub `main`、Forgejo `main`、Release 标签和安装 App 可能不同。只看 `package.json` 或一个远端会得出错误结论。
 - 目标目录可能已经包含历史任务、依赖和 DMG。直接递归复制会把数 GB 可再生成内容带入新项目；先做冲突清单，再只迁移跟踪文件。
-- m-wiki 入口可解析只代表浏览注册正确；OpenWiki 是否当前应以 `project-foundation wiki check` 为准。保留的候选目录本身不等于当前快照过期。
+- m-wiki 入口可解析只代表浏览注册正确，不证明源码、安装版或运行态健康；这些基线必须分别核验。
 
 ## 生产边界
 
