@@ -4,6 +4,23 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ## [Unreleased]
 
+### Added
+
+- Add an atomic `/api/snapshot` response with a non-secret catalog revision so the browser console and menu-bar panel can apply configuration, process state, and optional Docker state as one coherent frame.
+- Add read-only tunnel diagnostics that preserve the latest historical SSH and domain-entry errors without presenting recovered errors as current failures.
+
+### Fixed
+
+- Serialize ordinary and forced refreshes so an older slow response cannot overwrite a newer state, and guarantee that a forced refresh queued behind ordinary polling performs a genuinely fresh computation.
+- Preserve the last successful browser and menu-bar snapshot when the control plane is temporarily unavailable, mark it stale, and disable state-changing actions until a fresh snapshot succeeds.
+- Confirm a failed control-plane health probe before switching the menu-bar panel offline, avoiding status flicker from one short timeout.
+- Use the same four-state SSH action contract in the browser and menu bar. A failed domain entry with a healthy SSH process now retries only the domain check instead of stopping or restarting the tunnel.
+- Clear current user-facing SSH and domain errors after recovery while retaining their historical values under diagnostics.
+
+### Testing
+
+- Add isolated refresh acceptance for stale-data retention, mutation blocking, readable logs, and domain-only retry, plus coordinator, snapshot, tray, tunnel-action, and version-consistency regression coverage.
+
 ## [1.8.5] - 2026-08-08
 
 ### Added

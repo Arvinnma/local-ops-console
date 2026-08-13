@@ -126,6 +126,18 @@ Use an isolated runtime directory. Do not stop production resources for this gat
 
 ## 6. Package and installed-runtime verification
 
+Before packaging, run the isolated refresh acceptance in addition to the unit suite:
+
+```bash
+proxy_on >/dev/null 2>&1
+npm run check
+npm test
+npm run test:refresh-isolated
+git diff --check
+```
+
+The isolated acceptance must prove that a snapshot failure retains the previous service/tunnel list, disables service/SSH/Docker/terminal/sort mutations, keeps logs readable, and that a domain-only tunnel retry calls only the entry recheck endpoint rather than a Process Compose restart.
+
 Before packaging, verify configurable portless access in an isolated catalog:
 
 1. Render the PF anchor with a non-default valid Caddy port and confirm both IPv4 and IPv6 rules use the selected value.

@@ -6,6 +6,8 @@ This file is the project-owned source of truth for the currently installed build
 
 Status date: **2026-08-08**
 
+Source update date: **2026-08-14**
+
 ## English
 
 ### Version and repository baselines
@@ -20,6 +22,8 @@ Status date: **2026-08-08**
 | Verified release DMG | SHA-256 `968e389d1a188b7bc8d24465215b49ba37714d2465ec6573749016308a2a6fd9` | `Local-Ops-1.8.5-arm64.dmg`; checksum, ad-hoc signature, arm64 architecture, mounted layout, version, bundled tools, dynamic PF template, and packaged desktop files verified |
 
 Documentation-only commits may advance either `main`; `3c37d96` remains the latest runtime-affecting baseline for both repositories.
+
+The current source tree contains an unreleased refresh-consistency candidate while retaining package version `1.8.5`. It adds atomic catalog/state snapshots, serialized ordinary/forced refreshes, stale-snapshot protection, debounced menu-bar health decisions, a shared SSH action contract, and current-versus-historical error separation. Source checks, 122 unit/regression tests, and the isolated refresh acceptance pass. This candidate has not been packaged, installed, or runtime-verified against the production catalog; the installed App remains `1.8.4`, and the latest immutable public Release remains `v1.8.5`.
 
 The ProxyJump, resource-synchronization, SSH/readiness, managed-service lifecycle, menu-bar stop-safety, and configurable Caddy/PF port fixes are committed and packaged in v1.8.5. The currently installed App remains v1.8.4 because this release task deliberately built and published without replacing the live application.
 
@@ -57,6 +61,7 @@ The main-console synchronization fix was runtime-verified against nine configure
 - Replacing the bundled backend currently restarts the Local Ops control plane. During the verified private installation this also restarted Process Compose worker SSH processes once. Schedule upgrades after active transfers complete until backend upgrades can preserve worker processes.
 - Distribution remains Apple Silicon only, ad-hoc signed, and not notarized.
 - A terminal domain-entry probe runs every 30 seconds until recovery. This is intentionally low frequency, but it still sends a real HTTP request to the configured local entry.
+- The refresh-consistency candidate is source-verified only. Packaging, App replacement, and production PID/listener verification remain separate gates; a future release must use a new patch version rather than replacing `v1.8.5`.
 
 Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandatory verification sequence.
 
@@ -74,6 +79,8 @@ Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandat
 | 已验证 Release DMG | SHA-256 `968e389d1a188b7bc8d24465215b49ba37714d2465ec6573749016308a2a6fd9` | `Local-Ops-1.8.5-arm64.dmg` 已通过校验和、ad-hoc 签名、arm64 架构、挂载布局、版本、内置工具、动态 PF 模板和桌面端打包文件检查 |
 
 后续纯文档提交可能继续推进任一 `main`；`3c37d96` 仍是两个仓库最新的运行代码基线。
+
+当前源码树包含一批尚未发布的刷新一致性候选，同时包版本仍保持 `1.8.5`。它新增原子 catalog/state 快照、普通/强制刷新串行化、旧快照保护、菜单栏健康去抖、统一 SSH 动作契约，以及当前错误与历史错误分层。源码静态检查、122 项单元/回归测试和隔离刷新验收均已通过；这批候选尚未打包、安装，也没有针对生产 catalog 做运行验收。当前安装 App 仍是 `1.8.4`，最新不可变公开 Release 仍是 `v1.8.5`。
 
 ProxyJump、资源同步、SSH/readiness、托管服务生命周期、菜单栏停止安全和 Caddy/PF 可配置端口修复都已提交并打入 v1.8.5。当前安装 App 仍是 v1.8.4，因为本次发布任务刻意只构建并发布，没有覆盖现网 App。
 
@@ -111,5 +118,6 @@ ProxyJump、资源同步、SSH/readiness、托管服务生命周期、菜单栏�
 - 当前替换内置后台会重启 Local Ops 控制面。私有制品安装验收时，Process Compose Worker 下的 SSH 进程也随之重启过一次。在升级流程能够保留 Worker 前，应避开正在进行的数据传输。
 - 当前只提供 Apple Silicon 包，使用 ad-hoc 签名，尚未公证。
 - 终态恢复期间每 30 秒会向配置的本地域名入口发送一次真实 HTTP 请求；频率已刻意降低，但并非零流量。
+- 刷新一致性候选目前只完成源码验证。打包、替换 App 与生产 PID/listener 验收仍是独立门禁；未来发布必须使用新的 patch 版本，不能覆盖既有 `v1.8.5`。
 
 强制回归流程见[发布与热修回归手册](RELEASE_REGRESSION.md)。

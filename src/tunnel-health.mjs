@@ -247,6 +247,15 @@ export function resetTunnelRuntime(id) {
   else runtimeById.clear();
 }
 
+export function resetTunnelDomainRuntime(id) {
+  if (!id) return false;
+  const runtime = runtimeById.get(id);
+  if (!runtime) return false;
+  resetDomainRetry(runtime);
+  runtime.nextRetryAt = null;
+  return true;
+}
+
 export function latestTunnelError(logs) {
   const lines = String(logs || "")
     .replace(/\u001b\[[0-9;]*m/g, "")
@@ -342,13 +351,19 @@ function tunnelResult(definition, process, runtime, overrides) {
   const domainEntry = overrides.domainEntry || unavailableDomainEntry([], "");
   const connected = overrides.status === "connected" && Boolean(overrides.healthCheck?.ok);
   const readinessCheck = overrides.readinessCheck || readinessCheckDescriptor(definition);
+  const connectionFailureActive = overrides.status === "connection_failed" && !Boolean(overrides.healthCheck?.ok);
+  const domainFailureActive = Boolean(domainEntry.configured)
+    && !Boolean(domainEntry.ready)
+    && Boolean(domainEntry.terminal);
+  const historicalConnectionError = runtime.lastError || "";
+  const historicalDomainError = runtime.lastDomainError || domainEntry.error || "";
   return {
     ...process,
     ...overrides,
     connectionStatus: overrides.status,
     fullyAvailable: connected && readinessCheck.ok && (!domainEntry.configured || domainEntry.ready),
-    lastConnectionError: runtime.lastError,
-    lastConnectionErrorAt: runtime.lastErrorAt,
+    lastConnectionError: connectionFailureActive ? historicalConnectionError : "",
+    lastConnectionErrorAt: connectionFailureActive ? runtime.lastErrorAt : null,
     lastConnectedAt: runtime.lastSuccessAt,
     retryCount: Number(process.restarts || 0),
     retryLimit: tunnelRetryLimit(definition),
@@ -359,8 +374,14 @@ function tunnelResult(definition, process, runtime, overrides) {
     domainEntry: {
       ...domainEntry,
       lastReadyAt: runtime.lastDomainReadyAt,
-      lastError: runtime.lastDomainError || domainEntry.error || "",
-      lastErrorAt: runtime.lastDomainErrorAt
+      lastError: domainFailureActive ? historicalDomainError : "",
+      lastErrorAt: domainFailureActive ? runtime.lastDomainErrorAt : null
+    },
+    diagnostics: {
+      lastConnectionError: historicalConnectionError,
+      lastConnectionErrorAt: runtime.lastErrorAt,
+      lastDomainError: historicalDomainError,
+      lastDomainErrorAt: runtime.lastDomainErrorAt
     }
   };
 }

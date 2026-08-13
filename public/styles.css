@@ -415,6 +415,9 @@ th:last-child { text-align: right; }
 }
 .action-menu-item:hover,
 .action-menu-item:focus-visible { outline: 0; background: var(--surface-strong); color: var(--ink); }
+.action-menu-item:disabled { cursor: not-allowed; opacity: 0.42; background: transparent; color: var(--muted); }
+.action-menu-item:disabled:hover,
+.action-menu-item:disabled:focus-visible { background: transparent; color: var(--muted); }
 .action-menu-item svg { width: 16px; height: 16px; flex: 0 0 16px; color: var(--muted); }
 .action-menu-item.is-danger { color: var(--red); }
 .action-menu-item.is-danger svg { color: var(--red); }

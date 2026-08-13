@@ -53,8 +53,15 @@ import {
   recordProcessLifecycle,
   shouldAuditObservedStop
 } from "./process-lifecycle.mjs";
-import { enrichTunnelProcess, pruneTunnelRuntime, resetTunnelRuntime } from "./tunnel-health.mjs";
+import {
+  enrichTunnelProcess,
+  pruneTunnelRuntime,
+  resetTunnelDomainRuntime,
+  resetTunnelRuntime
+} from "./tunnel-health.mjs";
 import { enrichServiceProcess } from "./service-health.mjs";
+import { createRefreshCoordinator } from "./refresh-coordinator.mjs";
+import { catalogRevision as revisionForPublicCatalog } from "./catalog-revision.mjs";
 import { readTunnelNetworkState, writeTunnelNetworkState } from "./tunnel-network.mjs";
 import {
   managedRuntimeActive,
@@ -83,7 +90,7 @@ let mutationQueue = Promise.resolve();
 let workerConfigQueue = Promise.resolve();
 const processActionQueues = new Map();
 const tunnelRetryLimits = new Map();
-let stateCache = { at: 0, value: null };
+const stateRefresh = createRefreshCoordinator({ cacheTtlMs: 1800 });
 let dockerCache = { at: 0, value: null };
 let sessionCapturePromise = null;
 
@@ -102,6 +109,31 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/api/bootstrap") {
       return sendJson(response, 200, bootstrapPayload(catalog));
+    }
+    if (request.method === "GET" && url.pathname === "/api/snapshot") {
+      const fresh = url.searchParams.get("fresh") === "1";
+      const includeDocker = url.searchParams.get("docker") === "1";
+      const revision = catalogRevision(catalog);
+      const [state, docker] = await Promise.all([
+        getState(catalog, fresh, revision),
+        includeDocker
+          ? getDockerState(fresh).catch((error) => ({
+              available: false,
+              appInstalled: false,
+              daemonOnline: false,
+              containers: [],
+              error: cleanError(error)
+            }))
+          : Promise.resolve(null)
+      ]);
+      return sendJson(response, 200, {
+        schemaVersion: 1,
+        catalogRevision: revision,
+        generatedAt: state.generatedAt,
+        bootstrap: bootstrapPayload(catalog),
+        state,
+        docker
+      });
     }
     if (request.method === "GET" && url.pathname === "/api/config/export") {
       return sendJson(response, 200, createPortableConfigExport(catalog));
@@ -160,6 +192,22 @@ const server = http.createServer(async (request, response) => {
       });
       invalidateState();
       return sendJson(response, 200, { ok: true, id, action, requestedBy, requestedAt: at });
+    }
+
+    const tunnelEntryRecheckMatch = /^\/api\/tunnels\/([^/]+)\/recheck-entry$/.exec(url.pathname);
+    if (request.method === "POST" && tunnelEntryRecheckMatch) {
+      const id = decodeURIComponent(tunnelEntryRecheckMatch[1]);
+      const definition = assertKnownProcess(catalog, id);
+      if (definition.kind !== "tunnel") throw httpError(400, "仅 SSH 隧道支持入口重检");
+      resetTunnelDomainRuntime(id);
+      invalidateState();
+      const state = await getState(catalog, true);
+      return sendJson(response, 200, {
+        ok: true,
+        id,
+        action: "recheck-entry",
+        process: state.processes.find((item) => item.id === id) || null
+      });
     }
 
     const dockerActionMatch = /^\/api\/docker\/([^/]+)\/(start|stop|restart)$/.exec(url.pathname);
@@ -492,10 +540,15 @@ function bootstrapPayload(catalog) {
   };
 }
 
-async function getState(catalog, force = false) {
-  const now = Date.now();
-  if (!force && stateCache.value && now - stateCache.at < 1800) return stateCache.value;
+async function getState(catalog, force = false, revision = catalogRevision(catalog)) {
+  return stateRefresh.request({
+    key: revision,
+    force,
+    compute: () => computeState(catalog)
+  });
+}
 
+async function computeState(catalog) {
   let rawProcesses = [];
   let orchestrator = { online: true, workerOnline: true, error: "" };
   try {
@@ -588,8 +641,11 @@ async function getState(catalog, force = false) {
       loadAverage: os.loadavg()[0]
     }
   };
-  stateCache = { at: now, value };
   return value;
+}
+
+function catalogRevision(catalog) {
+  return revisionForPublicCatalog(publicCatalog(catalog));
 }
 
 function routeTargetsTunnel(route, tunnel) {
@@ -1495,7 +1551,7 @@ function sendJson(response, status, value) {
 }
 
 function invalidateState() {
-  stateCache = { at: 0, value: null };
+  stateRefresh.invalidate();
 }
 
 function invalidateDocker() {

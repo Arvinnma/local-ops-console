@@ -1,11 +1,13 @@
 import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.8.5";
 import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.8.5";
 import {
+  isDomainOnlyFailure,
   tunnelDisplayState,
   tunnelFailureMessage,
   tunnelPrimaryAction
 } from "./tunnel-ui.js?v=1.8.5";
 import { bootstrapConfigChanged } from "./resource-sync.js?v=1.8.5";
+import { createSnapshotRefreshCoordinator } from "./refresh-coordinator.js?v=1.8.5";
 
 const LANGUAGE_STORAGE_KEY = "local-ops-language";
 setLocale(normalizeLocale(localStorage.getItem(LANGUAGE_STORAGE_KEY)));
@@ -30,6 +32,9 @@ const ui = {
   orderVersions: new Map(),
   tunnelBusy: new Set(),
   polling: null,
+  snapshotState: "empty",
+  lastSuccessfulAt: null,
+  lastRefreshError: "",
   busy: false,
   portless: {
     available: false,
@@ -85,6 +90,19 @@ const sortDefinitions = {
   terminal: { configKey: "terminalTasks", endpoint: "terminal-tasks" }
 };
 
+const snapshotRefresh = createSnapshotRefreshCoordinator({
+  load: ({ force, includeDocker }) => request(
+    `/api/snapshot?fresh=${force ? 1 : 0}&docker=${includeDocker ? 1 : 0}`
+  ),
+  apply: applySnapshot,
+  onStateChange: ({ state, error }) => {
+    ui.snapshotState = state;
+    ui.lastRefreshError = state === "stale" ? String(error?.message || tr("刷新失败")) : "";
+    if (state === "fresh") ui.lastSuccessfulAt = new Date().toISOString();
+    updateRefreshPresentation();
+  }
+});
+
 document.addEventListener("DOMContentLoaded", initialize);
 
 async function initialize() {
@@ -96,7 +114,7 @@ async function initialize() {
     renderSettings();
     await Promise.allSettled([refreshPortlessAccess(), refreshLoginItemStatus()]);
     navigate(location.hash.slice(1) || "overview");
-    await refresh(true);
+    await refresh(true, { propagate: true });
     ui.polling = window.setInterval(() => refresh(false), 3500);
   } catch (error) {
     setConnection(false);
@@ -152,6 +170,10 @@ function bindEvents() {
     if (action) {
       event.preventDefault();
       closeActionMenu(false);
+      if (ui.snapshotState !== "fresh" && action.dataset.action !== "logs") {
+        toast(tr("当前状态不是最新数据，请先刷新"), "error");
+        return;
+      }
       return handleAction(action.dataset.action, action.dataset.id, action);
     }
 
@@ -181,7 +203,7 @@ function bindEvents() {
       return;
     }
     if (!menu?.hidden && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      const items = [...menu.querySelectorAll("[role=menuitem]")];
+      const items = [...menu.querySelectorAll("[role=menuitem]:not(:disabled)")];
       if (!items.length) return;
       event.preventDefault();
       const current = items.indexOf(document.activeElement);
@@ -252,31 +274,54 @@ function navigate(view, updateHash = true) {
   localizeDocument();
 }
 
-async function refresh(force = false) {
-  if (ui.busy && !force) return;
+async function refresh(force = false, { propagate = false } = {}) {
   try {
-    const tasks = [
-      request(`/api/state${force ? "?fresh=1" : ""}`),
-      request("/api/bootstrap")
-    ];
-    if (ui.activeView === "docker") tasks.push(request(`/api/docker${force ? "?fresh=1" : ""}`));
-    const [state, bootstrap, docker] = await Promise.all(tasks);
-    const configChanged = bootstrapConfigChanged(ui.bootstrap, bootstrap);
-    ui.bootstrap = bootstrap;
-    ui.state = state;
-    if (docker) ui.docker = docker;
-    if (configChanged) {
-      applyLanguage(bootstrap.config.settings.language);
-      renderSettings();
-      renderTerminalTable();
-    }
-    setConnection(state.orchestrator.online);
-    renderState();
-    if (docker) renderDocker();
+    return await snapshotRefresh.refresh({ force, includeDocker: ui.activeView === "docker" });
   } catch (error) {
-    setConnection(false);
+    setConnection(Boolean(ui.state?.orchestrator?.online), true);
     if (force) toast(error.message, "error");
+    if (propagate) throw error;
   }
+}
+
+function applySnapshot(snapshot) {
+  const { bootstrap, state, docker } = snapshot;
+  const configChanged = bootstrapConfigChanged(ui.bootstrap, bootstrap);
+  ui.bootstrap = bootstrap;
+  ui.state = state;
+  if (docker) ui.docker = docker;
+  if (configChanged) {
+    applyLanguage(bootstrap.config.settings.language);
+    renderSettings();
+    renderTerminalTable();
+  }
+  setConnection(state.orchestrator.online);
+  renderState();
+  if (docker) renderDocker();
+}
+
+function updateRefreshPresentation() {
+  document.documentElement.dataset.snapshotState = ui.snapshotState;
+  const button = document.querySelector("#refresh-button");
+  if (button) button.disabled = ui.snapshotState === "refreshing";
+  if (!ui.state) return;
+  const label = document.querySelector("#last-sync");
+  if (!label) return;
+  if (ui.snapshotState === "refreshing") {
+    label.textContent = tr("正在刷新…");
+    label.title = "";
+  } else if (ui.snapshotState === "stale") {
+    label.textContent = ui.lastSuccessfulAt
+      ? tr("刷新失败，显示 {time} 状态", { time: formatTime(ui.lastSuccessfulAt) })
+      : tr("刷新失败，显示上次状态");
+    label.title = ui.lastRefreshError;
+  } else label.title = "";
+  renderServicesTable();
+  renderTunnelCards();
+  renderRoutesTable();
+  renderTerminalTable();
+  if (ui.docker) renderDocker();
+  updateBulkStartButton();
 }
 
 function renderState() {
@@ -394,7 +439,7 @@ function updateBulkStartButton() {
   button.dataset.scope = mode.scope;
   const candidates = bulkStartCandidates(mode.scope);
   const waiting = mode.scope === "docker" ? !ui.docker : !ui.state;
-  button.disabled = ui.busy || waiting || candidates.length === 0;
+  button.disabled = ui.snapshotState !== "fresh" || ui.busy || waiting || candidates.length === 0;
   button.title = waiting
     ? tr("等待运行状态")
     : candidates.length
@@ -443,7 +488,7 @@ async function startAllForActiveView() {
   try {
     if (mode.scope === "docker") {
       const result = await request("/api/docker/start-all", { method: "POST" });
-      await refreshDocker(true);
+      await refreshDocker(true, { propagate: true });
       toast(tr("已启动 {items}", { items: tr("{count} 个 Docker 容器", { count: result.started }) }));
       return;
     }
@@ -451,7 +496,7 @@ async function startAllForActiveView() {
       request(`/api/processes/${encodeURIComponent(item.id)}/start`, { method: "POST" })
     )));
     await wait(450);
-    await refresh(true);
+    await refresh(true, { propagate: true });
     const succeeded = candidates.filter((_item, index) => results[index].status === "fulfilled");
     const failures = candidates.filter((_item, index) => results[index].status === "rejected");
     if (failures.length) toast(`已启动 ${bulkItemsLabel(mode, succeeded)}；${bulkItemsLabel(mode, failures)}启动失败`, "error");
@@ -659,7 +704,7 @@ function renderTerminalTable() {
     <td>${task.terminalApp === "iterm2" ? "iTerm2" : "系统终端"}</td>
     <td class="mono terminal-summary">${escapeHtml(terminalTaskSummary(task))}</td>
     <td class="action-cell">${actionControls(
-      actionButton("run-terminal", task.id, tr("执行"), task.name),
+      actionButton("run-terminal", task.id, tr("执行"), task.name, { disabled: ui.snapshotState !== "fresh" }),
       [menuAction("edit-terminal", task.id, tr("编辑"), task.name), menuAction("delete-terminal", task.id, tr("删除"), task.name)],
       task.name
     )}</td>
@@ -673,12 +718,11 @@ function terminalTaskSummary(task) {
   return task.localPort == null ? destination : `${destination} · 127.0.0.1:${task.localPort} → ${task.remoteHost}:${task.remotePort}`;
 }
 
-async function refreshDocker(force = false) {
+async function refreshDocker(force = false, { propagate = false } = {}) {
   try {
-    ui.docker = await request(`/api/docker${force ? "?fresh=1" : ""}`);
-    renderDocker();
-    updateBulkStartButton();
+    await snapshotRefresh.refresh({ force, includeDocker: true });
   } catch (error) {
+    if (propagate) throw error;
     toast(error.message, "error");
   }
 }
@@ -733,13 +777,17 @@ function dockerStateLabel(state) {
 }
 
 async function startDockerDesktop() {
+  if (ui.snapshotState !== "fresh") {
+    toast(tr("当前状态不是最新数据，请先刷新"), "error");
+    return;
+  }
   const button = document.querySelector("#docker-desktop-button");
   button.disabled = true;
   try {
     await request("/api/docker/desktop/start", { method: "POST" });
     toast("已请求启动 Docker Desktop，Engine 就绪后列表会自动刷新");
     await wait(1800);
-    await refreshDocker(true);
+    await refreshDocker(true, { propagate: true });
   } catch (error) {
     toast(error.message, "error");
   } finally {
@@ -806,7 +854,7 @@ async function saveProxyPort() {
   try {
     await window.localOpsDesktop.setProxyPort(port);
     await reloadBootstrap();
-    await refresh(true);
+    await refresh(true, { propagate: true });
     toast(tr("Caddy 内部端口已更新"));
   } catch (error) {
     input.disabled = false;
@@ -915,7 +963,7 @@ async function importConfigurationContent(fileName, contentPromise) {
       await window.localOpsDesktop.setLoginItemEnabled(Boolean(result.settings.launchAppAtLogin));
     }
     await reloadBootstrap();
-    await refresh(true);
+    await refresh(true, { propagate: true });
     const counts = result.counts || {};
     const total = [counts.services, counts.tunnels, counts.externalServices, counts.routes, counts.terminalTasks]
       .reduce((sum, value) => sum + Number(value || 0), 0);
@@ -1034,7 +1082,7 @@ async function togglePortlessAccess() {
     const result = await window.localOpsDesktop.setPortlessAccess(enable);
     ui.portless = { ...ui.portless, ...result, available: true, busy: false };
     await reloadBootstrap();
-    await refresh(true);
+    await refresh(true, { propagate: true });
     renderPortlessAccess();
     toast(tr(enable ? "无端口访问已启用" : "无端口访问已关闭"));
   } catch (error) {
@@ -1060,11 +1108,12 @@ function processControls(item, resourceActions = {}, extraClass = "") {
   menuItems.push(menuAction("logs", item.id, tr("查看日志"), resourceName));
   if (resourceActions.deleteAction) menuItems.push(menuAction(resourceActions.deleteAction, item.id, tr("删除"), resourceName));
 
+  const stale = ui.snapshotState !== "fresh";
   const primary = item.protected
     ? ""
     : active
-      ? actionButton("stop", item.id, tr("关闭"), resourceName)
-      : actionButton("start", item.id, tr("开启"), resourceName);
+      ? actionButton("stop", item.id, tr("关闭"), resourceName, { disabled: stale })
+      : actionButton("start", item.id, tr("开启"), resourceName, { disabled: stale });
   return actionControls(primary, menuItems, resourceName, extraClass);
 }
 
@@ -1077,7 +1126,7 @@ function tunnelControls(item, displayState, resourceActions = {}) {
   if (resourceActions.deleteAction) menuItems.push(menuAction(resourceActions.deleteAction, item.id, tr("删除"), resourceName));
 
   const primaryAction = tunnelPrimaryAction(displayState);
-  const primary = primaryAction.disabled
+  const primary = primaryAction.disabled || ui.snapshotState !== "fresh"
     ? disabledActionButton(primaryAction.style, tr(primaryAction.label), resourceName)
     : actionButton(primaryAction.action, item.id, tr(primaryAction.label), resourceName, { style: primaryAction.style });
   return actionControls(primary, menuItems, resourceName);
@@ -1091,9 +1140,10 @@ function routeControls(route, editable) {
 }
 
 function dockerControls(item) {
+  const stale = ui.snapshotState !== "fresh";
   const primary = item.running
-    ? actionButton("docker-stop", item.id, tr("关闭"), item.name)
-    : actionButton("docker-start", item.id, tr("开启"), item.name);
+    ? actionButton("docker-stop", item.id, tr("关闭"), item.name, { disabled: stale })
+    : actionButton("docker-start", item.id, tr("开启"), item.name, { disabled: stale });
   const menuItems = item.running ? [menuAction("docker-restart", item.id, tr("重启"), item.name)] : [];
   return actionControls(primary, menuItems, item.name);
 }
@@ -1105,7 +1155,15 @@ function actionControls(primary, menuItems, resourceName = "", extraClass = "") 
 }
 
 function menuAction(action, id, label, resourceName = "") {
-  return { type: "action", action, id, label, resourceName, style: actionStyle(action) };
+  return {
+    type: "action",
+    action,
+    id,
+    label,
+    resourceName,
+    style: actionStyle(action),
+    disabled: ui.snapshotState !== "fresh" && action !== "logs"
+  };
 }
 
 function actionMenuButton(items, resourceName = "") {
@@ -1177,7 +1235,7 @@ function toggleActionMenu(trigger) {
   menu.innerHTML = items.map(actionMenuItemMarkup).join("");
   menu.hidden = false;
 
-  menu.querySelector("[role=menuitem]")?.focus({ preventScroll: true });
+  menu.querySelector("[role=menuitem]:not(:disabled)")?.focus({ preventScroll: true });
 }
 
 function actionMenuItemMarkup(item) {
@@ -1187,7 +1245,10 @@ function actionMenuItemMarkup(item) {
   if (item.type === "link") {
     return `<a class="${className}" role="menuitem" data-menu-link href="${escapeAttribute(item.url)}" target="_blank" rel="noreferrer">${actionIcon(style)}<span>${escapeHtml(item.label)}</span></a>`;
   }
-  return `<button type="button" class="${className}" role="menuitem" aria-label="${escapeAttribute(item.label + suffix)}" data-action="${escapeAttribute(item.action)}" data-id="${escapeAttribute(item.id)}">${actionIcon(style)}<span>${escapeHtml(item.label)}</span></button>`;
+  const behavior = item.disabled
+    ? " disabled aria-disabled=\"true\""
+    : ` data-action="${escapeAttribute(item.action)}" data-id="${escapeAttribute(item.id)}"`;
+  return `<button type="button" class="${className}" role="menuitem" aria-label="${escapeAttribute(item.label + suffix)}"${behavior}>${actionIcon(style)}<span>${escapeHtml(item.label)}</span></button>`;
 }
 
 function closeActionMenu(restoreFocus = false) {
@@ -1222,7 +1283,7 @@ async function handleAction(action, id, element) {
     toast(`${actionLabel(action)} ${id}…`);
     await request(`/api/processes/${encodeURIComponent(id)}/${action}`, { method: "POST" });
     await wait(450);
-    await refresh(true);
+    await refresh(true, { propagate: true });
     toast(tr("{name} 已{action}", { name: id, action: ({ start: "启动", stop: "停止", restart: "重启" })[action] || action }));
   } catch (error) {
     toast(error.message, "error");
@@ -1240,12 +1301,13 @@ async function runTunnelConnectionAction(id, action) {
   try {
     await request(`/api/processes/${encodeURIComponent(id)}/${action}`, { method: "POST" });
     await wait(450);
-    await refresh(true);
+    await refresh(true, { propagate: true });
   } catch (error) {
     toast(error.message, "error");
   } finally {
     ui.tunnelBusy.delete(id);
-    await refresh(true);
+    renderTunnelCards();
+    localizeDocument(document.querySelector("#tunnel-cards"));
   }
 }
 
@@ -1256,15 +1318,21 @@ async function retryTunnel(id) {
   renderTunnelCards();
   localizeDocument(document.querySelector("#tunnel-cards"));
   try {
+    if (isProcessActive(process) && isDomainOnlyFailure(process)) {
+      await request(`/api/tunnels/${encodeURIComponent(id)}/recheck-entry`, { method: "POST" });
+      await refresh(true, { propagate: true });
+      return;
+    }
     const action = isProcessActive(process) ? "restart" : "start";
     await request(`/api/processes/${encodeURIComponent(id)}/${action}`, { method: "POST" });
     await wait(450);
-    await refresh(true);
+    await refresh(true, { propagate: true });
   } catch (error) {
     toast(error.message, "error");
   } finally {
     ui.tunnelBusy.delete(id);
-    await refresh(true);
+    renderTunnelCards();
+    localizeDocument(document.querySelector("#tunnel-cards"));
   }
 }
 
@@ -1274,7 +1342,7 @@ async function controlDocker(id, action) {
     updateBulkStartButton();
     await request(`/api/docker/${encodeURIComponent(id)}/${action}`, { method: "POST" });
     await wait(350);
-    await refreshDocker(true);
+    await refreshDocker(true, { propagate: true });
     toast(`Docker 容器已${actionLabel(action)}`);
   } catch (error) {
     toast(error.message, "error");
@@ -1308,7 +1376,7 @@ async function deleteResource(action, id) {
     ui.busy = true;
     await request(`/api/${endpoint}/${encodeURIComponent(id)}`, { method: "DELETE" });
     await reloadBootstrap();
-    await refresh(true);
+    await refresh(true, { propagate: true });
     toast(tr("{noun}已删除", { noun }));
   } catch (error) {
     toast(error.message, "error");
@@ -1458,6 +1526,10 @@ function updateTerminalSections() {
 
 async function saveResource(event) {
   event.preventDefault();
+  if (ui.editing && ui.snapshotState !== "fresh") {
+    toast(tr("当前状态不是最新数据，请先刷新"), "error");
+    return;
+  }
   const form = event.currentTarget;
   const data = new FormData(form);
   const button = document.querySelector("#save-resource");
@@ -1541,7 +1613,7 @@ async function saveResource(event) {
     document.querySelector("#add-dialog").close();
     ui.editing = null;
     await reloadBootstrap();
-    await refresh(true);
+    await refresh(true, { propagate: true });
     toast(tr(editing ? "更改已保存并应用" : "资源已保存并应用"));
   } catch (error) {
     toast(error.message, "error");
@@ -1636,8 +1708,9 @@ function sortItemAttributes(kind, id) {
 }
 
 function sortHandle(kind, id, disabled = false) {
-  if (disabled) {
-    return `<span class="sort-handle is-disabled" aria-disabled="true" title="${escapeAttribute(tr("系统固定资源不可排序"))}" aria-label="${escapeAttribute(tr("系统固定资源不可排序"))}">${actionIcon("drag")}</span>`;
+  if (disabled || ui.snapshotState !== "fresh") {
+    const label = disabled ? tr("系统固定资源不可排序") : tr("状态不是最新数据，暂不可排序");
+    return `<span class="sort-handle is-disabled" aria-disabled="true" title="${escapeAttribute(label)}" aria-label="${escapeAttribute(label)}">${actionIcon("drag")}</span>`;
   }
   return `<span class="sort-handle" draggable="true" data-sort-drag data-kind="${escapeAttribute(kind)}" data-id="${escapeAttribute(id)}" title="${escapeAttribute(tr("拖动排序"))}" aria-label="${escapeAttribute(tr("拖动排序"))}">${actionIcon("drag")}</span>`;
 }
@@ -1692,6 +1765,11 @@ function renderSortedKind(kind) {
 function handleSortDragStart(event) {
   const handle = event.target.closest("[data-sort-drag]");
   if (!handle) return;
+  if (ui.snapshotState !== "fresh") {
+    event.preventDefault();
+    toast(tr("当前状态不是最新数据，请先刷新"), "error");
+    return;
+  }
   const item = handle.closest("[data-sort-item]");
   if (!item) return;
   ui.dragging = { kind: item.dataset.sortKind, id: item.dataset.sortId, item };
@@ -1790,9 +1868,9 @@ async function request(url, options = {}) {
   return payload;
 }
 
-function setConnection(online) {
+function setConnection(online, stale = false) {
   document.querySelector("#sidebar-dot").className = `pulse-dot ${online ? "online" : "offline"}`;
-  document.querySelector("#sidebar-status").textContent = tr(online ? "控制面在线" : "控制面离线");
+  document.querySelector("#sidebar-status").textContent = tr(stale ? "状态刷新失败" : online ? "控制面在线" : "控制面离线");
   updateSettingsMetrics();
 }
 

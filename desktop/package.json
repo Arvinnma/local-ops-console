@@ -27,8 +27,11 @@
     "asar": true,
     "files": [
       "main.cjs",
+      "control-health.cjs",
       "portless-config.cjs",
+      "refresh-coordinator.cjs",
       "startup-mode.cjs",
+      "tunnel-action.cjs",
       "window-lifecycle.cjs",
       "preload.cjs",
       "splash.html",

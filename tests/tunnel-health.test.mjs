@@ -58,7 +58,8 @@ test("a new tunnel without a TCP listener transitions from connecting to retryin
   resetTunnelRuntime(definition.id);
   const first = await enrichTunnelProcess(definition, runningProcess(), { now: 2_000_000 });
   assert.equal(first.status, "connecting");
-  assert.match(first.lastConnectionError, /fetch failed|ECONNREFUSED|refused/i);
+  assert.equal(first.lastConnectionError, "");
+  assert.match(first.diagnostics.lastConnectionError, /fetch failed|ECONNREFUSED|refused/i);
 
   const second = await enrichTunnelProcess(definition, runningProcess(), { now: 2_006_000 });
   assert.equal(second.status, "retrying");
@@ -164,7 +165,8 @@ test("a restarting SSH process exposes its latest error and next retry", async (
   });
   assert.equal(result.status, "retrying");
   assert.equal(result.retryCount, 4);
-  assert.match(result.lastConnectionError, /Operation timed out/);
+  assert.equal(result.lastConnectionError, "");
+  assert.match(result.diagnostics.lastConnectionError, /Operation timed out/);
   assert.ok(Date.parse(result.nextRetryAt) > now);
 });
 
@@ -389,6 +391,8 @@ test("a failed full-domain check stays connecting until the manual retry budget 
   assert.equal(result.status, "connected");
   assert.equal(result.domainEntry.ready, true);
   assert.equal(result.domainEntry.terminal, undefined);
+  assert.equal(result.domainEntry.lastError, "");
+  assert.match(result.diagnostics.lastDomainError, /HTTP 404/);
   assert.equal(entryProbeCount, 5);
 });
 

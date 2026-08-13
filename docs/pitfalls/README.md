@@ -7,6 +7,12 @@
 - 带 `ProxyJump` / `ProxyCommand` 的 SSH 别名应由 OpenSSH 管理完整链路，不能直接探测最终回环 HostName/Port 后伪造成功或失败。
 - HTTP 超时或 `5xx` 只能降级应用 readiness，不能杀死仍健康的 SSH 进程。详细矩阵见 [RELEASE_REGRESSION.md](../RELEASE_REGRESSION.md)。
 
+## 刷新与托盘动作
+
+- 强制刷新不能直接复用正在运行的普通刷新；普通轮结束后必须再执行一次 fresh 轮，否则用户看到的“刷新成功”仍可能是缓存状态。
+- 刷新失败不等于控制面或 SSH 已离线。主界面和菜单栏应保留最后一次成功快照、标记 stale，并禁用基于旧状态的写操作。
+- `active` 只说明进程仍存在，不能单独决定托盘执行 stop。SSH 健康但域名入口终态失败时，正确动作是重检入口，不能停止或重启 SSH。
+
 ## 源码、安装与发布
 
 - `scripts/build-app.zsh` 名称看似“构建”，实际会退出并覆盖 `/Applications/Local Ops.app`；普通打包应使用 `npm run build:dmg`。

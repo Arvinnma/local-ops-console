@@ -48,7 +48,7 @@ function render(state) {
     : (english ? "Offline" : "离线");
   connectionStatus.className = `connection-status ${state.online ? "is-online" : "is-offline"}`;
   summary.textContent = state.summary;
-  offlineBanner.hidden = state.online;
+  offlineBanner.hidden = state.online && state.snapshotState !== "stale";
   refreshButton.textContent = state.labels.refresh;
   showMainButton.textContent = state.labels.showMain;
   openBrowserButton.textContent = state.labels.openBrowser;

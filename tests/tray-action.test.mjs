@@ -85,7 +85,7 @@ test("resource rows only dispatch actions from a trusted click and include audit
     name: "1Panel",
     disabled: false,
     status: "已连接",
-    action: { type: "process", id: "panel-office", kind: "tunnel" }
+    action: { type: "process", id: "panel-office", kind: "tunnel", expectedOperation: "stop" }
   });
 
   row.dispatch("click", { isTrusted: false });
@@ -95,6 +95,7 @@ test("resource rows only dispatch actions from a trusted click and include audit
   assert.equal(calls.length, 1);
   assert.equal(calls[0].eventName, "tray-panel.resource-row.click");
   assert.equal(calls[0].gestureType, "click");
+  assert.equal(calls[0].expectedOperation, "stop");
   assert.match(calls[0].gestureAt, /^\d{4}-/);
 });
 
@@ -105,4 +106,10 @@ test("desktop tray stop mutations require confirmation and send lifecycle audit 
   assert.match(source, /X-Local-Ops-Action-Id/);
   assert.match(source, /X-Local-Ops-Call-Path/);
   assert.match(source, /X-Local-Ops-User-Intent-Confirmed/);
+});
+
+test("desktop rejects a tray click whose expected operation no longer matches current state", async () => {
+  const source = await readFile(new URL("../desktop/main.cjs", import.meta.url), "utf8");
+  assert.match(source, /operationMatches\(payload\.expectedOperation, action\)/);
+  assert.match(source, /tray stale-action refresh failed/);
 });

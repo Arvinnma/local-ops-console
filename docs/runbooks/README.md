@@ -18,8 +18,11 @@ cd /Users/arvin/Documents/AI/codex/local-ops-console
 proxy_on >/dev/null 2>&1
 npm run check
 npm test
+npm run test:refresh-isolated
 git diff --check
 ```
+
+`test:refresh-isolated` 启动临时 HTTP 控制面和无界面浏览器，验证旧快照保留、stale 写操作禁用、主界面 SSH 动作以及域名入口单独重检；它不读取或修改生产 catalog。
 
 原生钥匙串相关改动再按[测试入口](../testing/README.md)构建临时 Helper 并运行集成测试。
 

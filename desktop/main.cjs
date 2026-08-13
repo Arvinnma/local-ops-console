@@ -14,6 +14,14 @@ const {
   shouldStartSilently
 } = require("./startup-mode.cjs");
 const { bringWindowToFront } = require("./window-lifecycle.cjs");
+const { confirmControlHealth } = require("./control-health.cjs");
+const { createRefreshCoordinator } = require("./refresh-coordinator.cjs");
+const {
+  operationMatches,
+  processIsActive,
+  resolveTunnelOperation,
+  tunnelDisplayState: sharedTunnelDisplayState
+} = require("./tunnel-action.cjs");
 const {
   conflictingRuntimePort,
   normalizeProxyPort,
@@ -47,7 +55,9 @@ let tray = null;
 let trayPanelWindow = null;
 let trayMenu = null;
 let traySnapshot = null;
-let trayRefreshPromise = null;
+let traySnapshotState = "empty";
+let trayLastSuccessfulAt = null;
+let trayLastRefreshError = "";
 const trayActionsInFlight = new Set();
 let reconnectTimer = null;
 let healthTimer = null;
@@ -389,10 +399,10 @@ function toggleTrayPanel() {
     return;
   }
   positionTrayPanel(panel);
+  if (isOnline) void refreshTraySnapshot(true).catch((error) => log(`tray open refresh failed: ${error.message}`));
   pushTrayPanelState();
   panel.show();
   panel.focus();
-  if (isOnline) void refreshTraySnapshot(true);
 }
 
 function positionTrayPanel(panel) {
@@ -413,13 +423,13 @@ function positionTrayPanel(panel) {
   panel.setBounds({ x, y, width: TRAY_PANEL_WIDTH, height }, false);
 }
 
-function updateTray(online) {
+function updateTray(online, { forceRefresh = false } = {}) {
   isOnline = online;
   if (!tray) return;
-  if (!online) traySnapshot = null;
+  if (!online && traySnapshot) traySnapshotState = "stale";
   tray.setToolTip(trayTooltip());
   rebuildTrayMenu();
-  if (online) void refreshTraySnapshot();
+  if (online) void refreshTraySnapshot(forceRefresh).catch((error) => log(`tray background refresh failed: ${error.message}`));
 }
 
 function rebuildTrayMenu() {
@@ -431,7 +441,10 @@ function rebuildTrayMenu() {
 function buildTrayMenu() {
   const t = trayText;
   const footer = [
-    { label: t("刷新状态", "Refresh Status"), click: () => void refreshTraySnapshot(true) },
+    {
+      label: t("刷新状态", "Refresh Status"),
+      click: () => void refreshTraySnapshot(true).catch((error) => log(`tray menu refresh failed: ${error.message}`))
+    },
     { label: t("显示控制台", "Show Console"), click: showMainWindow },
     {
       label: t("更多", "More"),
@@ -621,21 +634,7 @@ function trayManagedResourceLabel(name, processState, kind, busy = false) {
 }
 
 function tunnelPresentationState(processState) {
-  const status = String(processState?.status || "unknown");
-  if (status === "disabled" || status === "stopped" || !processState) return "stopped";
-  const healthReady = Boolean(processState.healthCheck?.ok);
-  const domainReady = !processState.domainEntry?.configured || Boolean(processState.domainEntry?.ready);
-  if (status === "connected" && healthReady && domainReady) return "connected";
-  if (status === "connection_failed" || (status === "connected" && healthReady && !domainReady && processState.domainEntry?.terminal)) {
-    return "connection_failed";
-  }
-  return processIsActive(processState) || ["waiting_network", "connecting", "retrying", "restarting", "running"].includes(status)
-    ? "connecting"
-    : "connection_failed";
-}
-
-function processIsActive(processState) {
-  return Boolean(processState?.active ?? processState?.status === "running");
+  return sharedTunnelDisplayState(processState);
 }
 
 function trayReadyLabel(name, busy = false) {
@@ -696,9 +695,10 @@ function buildTrayPanelState() {
     const actionKey = `process:${definition.id}`;
     const processState = processById.get(definition.id);
     const active = processIsActive(processState);
-    const tunnelState = kind === "tunnel" ? tunnelPresentationState(processState) : null;
-    const connected = kind === "tunnel" ? tunnelState === "connected" : processState?.status === "running";
     const busy = trayActionsInFlight.has(actionKey);
+    const tunnelAction = kind === "tunnel" ? resolveTunnelOperation(processState, busy) : null;
+    const tunnelState = tunnelAction?.displayState || null;
+    const connected = kind === "tunnel" ? tunnelState === "connected" : processState?.status === "running";
     const status = busy
       ? t("处理中", "Working")
       : kind === "tunnel"
@@ -715,10 +715,17 @@ function buildTrayPanelState() {
       running: connected,
       active,
       busy,
-      disabled: !isOnline,
+      disabled: !isOnline || traySnapshotState !== "fresh" || Boolean(tunnelAction?.disabled),
       tone: busy || tunnelState === "connecting" ? "busy" : connected ? "running" : "stopped",
       status,
-      action: { type: "process", id: definition.id, kind }
+      displayState: tunnelState,
+      operation: kind === "tunnel" ? tunnelAction.operation : active ? "stop" : "start",
+      action: {
+        type: "process",
+        id: definition.id,
+        kind,
+        expectedOperation: kind === "tunnel" ? tunnelAction.operation : active ? "stop" : "start"
+      }
     };
   });
 
@@ -739,7 +746,7 @@ function buildTrayPanelState() {
       name: docker.appInstalled ? "Docker Desktop" : t("Docker Desktop 未安装", "Docker Desktop Not Installed"),
       running: false,
       busy,
-      disabled: !docker.appInstalled,
+      disabled: traySnapshotState !== "fresh" || !docker.appInstalled,
       status: busy ? t("启动中", "Starting") : t("已关闭", "Off"),
       action: docker.appInstalled ? { type: "docker-desktop" } : null
     }];
@@ -752,7 +759,7 @@ function buildTrayPanelState() {
         name: container.name || container.shortId,
         running: Boolean(container.running),
         busy,
-        disabled: false,
+        disabled: traySnapshotState !== "fresh",
         status: busy ? t("处理中", "Working") : container.running ? t("已开启", "On") : t("已关闭", "Off"),
         action: { type: "docker", id: container.id }
       };
@@ -783,7 +790,7 @@ function buildTrayPanelState() {
           name: task.name || task.id,
           running: isOnline,
           busy,
-          disabled: !isOnline,
+          disabled: !isOnline || traySnapshotState !== "fresh",
           status: busy ? t("执行中", "Running") : isOnline ? t("就绪", "Ready") : t("不可用", "Unavailable"),
           action: { type: "terminal", id: task.id }
         };
@@ -814,7 +821,10 @@ function buildTrayPanelState() {
 
   return {
     online: isOnline,
-    refreshing: Boolean(trayRefreshPromise),
+    refreshing: traySnapshotState === "refreshing",
+    snapshotState: traySnapshotState,
+    lastSuccessfulAt: trayLastSuccessfulAt,
+    lastRefreshError: trayLastRefreshError,
     language,
     labels: {
       refresh: t("刷新", "Refresh"),
@@ -823,7 +833,9 @@ function buildTrayPanelState() {
       openLogs: t("日志", "Logs"),
       quitApp: t("退出", "Quit"),
       offlineTitle: t("后台控制面未连接", "Control Plane Offline"),
-      offlineDetail: t("资源状态暂时不可用，请稍后刷新。", "Resource status is unavailable. Refresh again shortly.")
+      offlineDetail: traySnapshotState === "stale"
+        ? t("刷新失败，当前显示上次成功状态。", "Refresh failed. Showing the last successful state.")
+        : t("资源状态暂时不可用，请稍后刷新。", "Resource status is unavailable. Refresh again shortly.")
     },
     summary: isOnline
       ? t(
@@ -873,6 +885,9 @@ async function performTrayPanelAction(payload = {}) {
     }, 60);
     return {};
   }
+  if (["process", "terminal", "docker-desktop", "docker"].includes(type) && traySnapshotState !== "fresh") {
+    throw new Error(trayText("当前状态不是最新数据，请先刷新", "State is stale. Refresh first."));
+  }
   if (type === "route") {
     const route = (config.routes || []).find((item) => item.id === String(payload.id || ""));
     if (!route || route.enabled === false || !isSafeExternalUrl(route.url)) throw new Error("该反向代理地址不可用");
@@ -886,8 +901,17 @@ async function performTrayPanelAction(payload = {}) {
     const definitions = [...(config.services || []), ...(config.tunnels || [])];
     const definition = definitions.find((item) => item.id === String(payload.id || ""));
     if (!definition) throw new Error("没有找到该服务或 SSH 隧道");
-    const active = processIsActive(processById.get(definition.id));
-    const action = active ? "stop" : "start";
+    const currentProcess = processById.get(definition.id);
+    const active = processIsActive(currentProcess);
+    const resolved = definition.kind === "tunnel"
+      ? resolveTunnelOperation(currentProcess, trayActionsInFlight.has(`process:${definition.id}`))
+      : { operation: active ? "stop" : "start", disabled: false };
+    if (resolved.disabled || !resolved.operation) throw new Error(trayText("资源状态已变化，请刷新后重试", "Resource state changed. Refresh and try again."));
+    const action = resolved.operation;
+    if (!operationMatches(payload.expectedOperation, action)) {
+      void refreshTraySnapshot(true).catch((error) => log(`tray stale-action refresh failed: ${error.message}`));
+      throw new Error(trayText("资源状态已变化，请刷新后重试", "Resource state changed. Refresh and try again."));
+    }
     const eventName = String(payload.eventName || "");
     const gestureAt = Date.parse(String(payload.gestureAt || ""));
     if (
@@ -897,6 +921,10 @@ async function performTrayPanelAction(payload = {}) {
       || Math.abs(Date.now() - gestureAt) > 10000
     ) {
       throw new Error("托盘操作缺少有效的用户点击，已取消");
+    }
+    if (action === "domain-recheck") {
+      await runTrayMutation(`process:${definition.id}`, `/api/tunnels/${encodeURIComponent(definition.id)}/recheck-entry`, 30000);
+      return { message: trayText(`${definition.name || definition.id} 已重新检查入口`, `${definition.name || definition.id} entry rechecked`) };
     }
     const confirmed = action !== "stop" || await confirmTrayProcessStop(definition, "tray-panel");
     if (!confirmed) return { cancelled: true };
@@ -912,7 +940,8 @@ async function performTrayPanelAction(payload = {}) {
         callPath: "tray.renderer:resource-row.click>desktop.ipc:performTrayPanelAction>control-api"
       })
     );
-    return { message: trayText(`${definition.name || definition.id} 已${active ? "关闭" : "开启"}`, `${definition.name || definition.id} ${active ? "stopped" : "started"}`) };
+    const actionCopy = action === "stop" ? ["关闭", "stopped"] : action === "restart" ? ["重试", "retried"] : ["开启", "started"];
+    return { message: trayText(`${definition.name || definition.id} 已${actionCopy[0]}`, `${definition.name || definition.id} ${actionCopy[1]}`) };
   }
 
   if (type === "terminal") {
@@ -1001,33 +1030,28 @@ function trayProcessAudit({ eventName, definition, action, confirmed, callPath }
   };
 }
 
-function refreshTraySnapshot(force = false) {
-  if (!isOnline) return Promise.resolve();
-  if (trayRefreshPromise) return trayRefreshPromise;
-  trayRefreshPromise = (async () => {
-    const suffix = force ? "?fresh=1" : "";
-    const [bootstrap, state, docker] = await Promise.all([
-      controlRequestJson("/api/bootstrap", { timeout: 12000 }),
-      controlRequestJson(`/api/state${suffix}`, { timeout: 25000 }),
-      controlRequestJson(`/api/docker${suffix}`, { timeout: 25000 }).catch((error) => ({
-        available: false,
-        appInstalled: false,
-        daemonOnline: false,
-        containers: [],
-        error: error.message
-      }))
-    ]);
-    traySnapshot = { bootstrap, state, docker, at: Date.now() };
+const trayRefreshCoordinator = createRefreshCoordinator({
+  load: async (force) => {
+    if (!isOnline) throw new Error(trayText("后台控制面未连接", "Control plane offline"));
+    const snapshot = await controlRequestJson(`/api/snapshot?fresh=${force ? 1 : 0}&docker=1`, { timeout: 30000 });
+    traySnapshot = { ...snapshot, at: Date.now() };
+    trayLastSuccessfulAt = new Date().toISOString();
+    trayLastRefreshError = "";
     configureAboutPanel();
     createApplicationMenu();
     if (tray) tray.setToolTip(trayTooltip());
     rebuildTrayMenu();
-  })().catch((error) => {
-    log(`tray refresh failed: ${error.message}`);
-  }).finally(() => {
-    trayRefreshPromise = null;
-  });
-  return trayRefreshPromise;
+    return traySnapshot;
+  },
+  onStateChange: ({ state, error }) => {
+    traySnapshotState = state;
+    if (state === "stale") trayLastRefreshError = nativeErrorMessage(error?.message || "刷新失败").slice(0, 240);
+    pushTrayPanelState();
+  }
+});
+
+function refreshTraySnapshot(force = false) {
+  return trayRefreshCoordinator.refresh(force);
 }
 
 function trayTooltip() {
@@ -1111,7 +1135,7 @@ async function connectControlPlane() {
     await ensureControlPlane(installResult.restartRequired);
     applyLoginItemPreference();
     await loadConsole();
-    updateTray(true);
+    updateTray(true, { forceRefresh: true });
     void applyAppStartupActionsOnce();
     if (startupPresentation.shouldShowWindow()) void maybeOfferPortlessAccess();
   } catch (error) {
@@ -1158,7 +1182,7 @@ async function restartControlPlane() {
     }
     await waitForHealth(18000);
     await loadConsole();
-    updateTray(true);
+    updateTray(true, { forceRefresh: true });
   } catch (error) {
     updateTray(false);
     await showOffline(error.message);
@@ -1852,7 +1876,7 @@ function scheduleReconnect(delay = 2000) {
     if (isQuitting) return;
     if (await checkHealth()) {
       await loadConsole();
-      updateTray(true);
+      updateTray(true, { forceRefresh: true });
       void applyAppStartupActionsOnce();
     } else {
       updateTray(false);
@@ -1864,19 +1888,27 @@ function scheduleReconnect(delay = 2000) {
 function startHealthMonitor() {
   clearInterval(healthTimer);
   healthTimer = setInterval(async () => {
-    const online = await checkHealth();
+    const health = await checkHealthDetails({ logTransientFailure: true });
+    const online = health.ok;
     if (online !== isOnline) {
-      updateTray(online);
-      log(`health changed: ${online ? "online" : "offline"}`);
+      updateTray(online, { forceRefresh: online });
+      log(`health changed: ${online ? "online" : "offline"} latency=${health.latencyMs ?? "-"} error=${health.error || ""}`);
       if (online && mainWindow && mainWindow.webContents.getURL().startsWith("file:")) await loadConsole();
     }
-    if (online) void refreshTraySnapshot();
+    if (online) void refreshTraySnapshot().catch((error) => log(`tray monitor refresh failed: ${error.message}`));
   }, 10000);
 }
 
-function checkHealth() {
+function probeControlHealth(timeout = 1200) {
   return new Promise((resolve) => {
-    const request = http.get({ hostname: "127.0.0.1", port: 19090, path: "/api/health", timeout: 1200 }, (response) => {
+    const started = Date.now();
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve({ latencyMs: Date.now() - started, ...result });
+    };
+    const request = http.get({ hostname: "127.0.0.1", port: 19090, path: "/api/health", timeout }, (response) => {
       let body = "";
       response.setEncoding("utf8");
       response.on("data", (chunk) => {
@@ -1885,15 +1917,32 @@ function checkHealth() {
       response.on("end", () => {
         try {
           const payload = JSON.parse(body);
-          resolve(response.statusCode === 200 && payload.ok === true && payload.service === "local-ops-console");
+          const ok = response.statusCode === 200 && payload.ok === true && payload.service === "local-ops-console";
+          finish({ ok, error: ok ? "" : `HTTP ${response.statusCode}` });
         } catch {
-          resolve(false);
+          finish({ ok: false, error: "健康响应格式无效" });
         }
       });
     });
-    request.on("timeout", () => { request.destroy(); resolve(false); });
-    request.on("error", () => resolve(false));
+    request.on("timeout", () => { request.destroy(); finish({ ok: false, error: "健康检查超时" }); });
+    request.on("error", (error) => finish({ ok: false, error: error.message }));
   });
+}
+
+async function checkHealthDetails({ logTransientFailure = false } = {}) {
+  return confirmControlHealth({
+    probe: (timeout) => probeControlHealth(timeout),
+    wait: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    onFirstFailure: (failure) => {
+      if (logTransientFailure) {
+        log(`health probe failed, confirming: latency=${failure.latencyMs ?? "-"} error=${failure.error || ""}`);
+      }
+    }
+  });
+}
+
+async function checkHealth() {
+  return Boolean((await checkHealthDetails()).ok);
 }
 
 async function waitForHealth(timeoutMs) {
