@@ -81,7 +81,7 @@ test("normalizes a safe SSH tunnel", () => {
   assert.equal("autoStart" in tunnel, false);
 });
 
-test("renders manually started SSH tunnels with three retries and no scheduler autostart", () => {
+test("renders managed SSH tunnels with a ten-failure wrapper budget and no scheduler restart ceiling", () => {
   const catalog = structuredClone(loadCatalog());
   catalog.tunnels = [normalizeTunnel({
     id: "panel-test",
@@ -98,9 +98,13 @@ test("renders manually started SSH tunnels with three retries and no scheduler a
   assert.match(compose, /ConnectionAttempts=1/);
   assert.match(compose, /BatchMode=yes/);
   assert.match(compose, /backoff_seconds: 3/);
-  assert.match(compose, /max_restarts: 3/);
+  assert.doesNotMatch(compose, /max_restarts:/);
   assert.match(compose, /disabled: true/);
-  assert.match(compose, /--retry-limit '3'/);
+  assert.match(compose, /--retry-limit '10'/);
+  assert.match(compose, /--bind-address '127\.0\.0\.1'/);
+  assert.match(compose, /--local-port '18080'/);
+  assert.match(compose, /--health-url 'http:\/\/127\.0\.0\.1:18080\/'/);
+  assert.match(compose, /--stable-window-ms '10000'/);
   assert.match(compose, /--lifecycle '[^']*process-lifecycle\.json'/);
   assert.match(compose, /run-managed-tunnel\.mjs/);
   assert.match(compose, /--host.*example\.com/);
@@ -144,7 +148,7 @@ test("keeps services without a health endpoint on their existing direct lifecycl
   assert.doesNotMatch(compose, /run-managed-service\.mjs/);
 });
 
-test("startup-restored SSH tunnels use a forty-retry runtime policy", () => {
+test("startup-restored SSH tunnels use the same ten-failure runtime policy", () => {
   const catalog = structuredClone(loadCatalog());
   catalog.tunnels = [normalizeTunnel({
     id: "manual-tunnel",
@@ -160,9 +164,9 @@ test("startup-restored SSH tunnels use a forty-retry runtime policy", () => {
   });
   assert.match(compose, /restart: "always"/);
   assert.match(compose, /backoff_seconds: 3/);
-  assert.match(compose, /max_restarts: 40/);
+  assert.doesNotMatch(compose, /max_restarts:/);
   assert.match(compose, /disabled: true/);
-  assert.match(compose, /--retry-limit '40'/);
+  assert.match(compose, /--retry-limit '10'/);
 });
 
 test("rejects non-local tunnel health checks", () => {

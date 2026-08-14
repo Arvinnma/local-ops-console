@@ -4,6 +4,8 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ## [Unreleased]
 
+## [1.8.6] - 2026-08-14
+
 ### Added
 
 - Add an atomic `/api/snapshot` response with a non-secret catalog revision so the browser console and menu-bar panel can apply configuration, process state, and optional Docker state as one coherent frame.
@@ -16,6 +18,9 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 - Confirm a failed control-plane health probe before switching the menu-bar panel offline, avoiding status flicker from one short timeout.
 - Use the same four-state SSH action contract in the browser and menu bar. A failed domain entry with a healthy SSH process now retries only the domain check instead of stopping or restarting the tunnel.
 - Clear current user-facing SSH and domain errors after recovery while retaining their historical values under diagnostics.
+- Replace Process Compose's lifetime cumulative tunnel restart budget with an independent per-tunnel consecutive-failure supervisor. Attempts 1–9 retry at the existing three-second cadence, attempt 10 becomes terminal, and a verified ten-second stable connection resets the counter to zero.
+- Require the SSH forward, loopback listener, optional HTTP readiness check, and stability window before resetting consecutive failures, so a child that starts and immediately exits cannot erase its failure episode.
+- Show the current consecutive tunnel failure count in the UI instead of conflating it with the configured retry ceiling.
 
 ### Testing
 
@@ -152,6 +157,7 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 - Added the self-contained Electron DMG, automatic backend installation, portless loopback access, and bundled Caddy / Process Compose binaries.
 
 [1.7.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.7.0
+[1.8.6]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.6
 [1.8.5]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.5
 [1.8.4]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.4
 [1.8.3]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.3

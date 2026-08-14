@@ -28,7 +28,7 @@ Local Ops combines an Electron desktop app, a browser console, Process Compose, 
 - Docker Desktop is optional and is required only for Docker controls
 - Terminal.app is built in; iTerm2 is optional
 
-Intel (`x64`) packages are not provided in v1.8.5.
+Intel (`x64`) packages are not provided in v1.8.6.
 
 ## What it manages
 
@@ -49,7 +49,7 @@ Intel (`x64`) packages are not provided in v1.8.5.
 
 ## Install
 
-1. Download `Local-Ops-1.8.5-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
+1. Download `Local-Ops-1.8.6-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch **Local Ops** from Applications.
 
@@ -78,7 +78,7 @@ The **Needs Attention** card opens a detailed list of every stopped, unhealthy, 
 
 The browser console and menu-bar panel apply configuration and runtime state as one atomic snapshot. Manual refreshes queued behind background polling still perform a genuinely fresh read, so a slow older response cannot roll the UI back. If the control plane is temporarily unavailable, Local Ops keeps the last successful snapshot visibly marked as stale, disables state-changing actions, and leaves read-only links and logs available until a fresh snapshot succeeds.
 
-Before connecting, Local Ops reads the effective SSH configuration—including the real `HostName/Port` behind an alias—and probes that endpoint. If the boot-time network is unavailable, the card remains **Connecting** while its **SSH Host Network** detail explains that it is waiting for network. It starts on the next three-second retry after the endpoint becomes reachable, without a fixed startup delay. Tunnels no longer start merely because the service scheduler starts: connections triggered from the web UI, menu bar, or bulk controls retry up to 3 times, while tunnels restored by **Restore the Previous Session When the App Opens** retry up to 40 times. Only an exhausted retry budget becomes **Connection Failed**; the yellow action begins a new three-retry manual cycle.
+Before connecting, Local Ops reads the effective SSH configuration—including the real `HostName/Port` behind an alias—and probes that endpoint. If the boot-time network is unavailable, the card remains **Connecting** while its **SSH Host Network** detail explains that it is waiting for network. It starts on the next three-second retry after the endpoint becomes reachable, without a fixed startup delay. Every managed tunnel now owns an independent ten-consecutive-failure budget. The counter is cleared only after the SSH forward, loopback listener, optional HTTP readiness check, and a ten-second stability window all succeed. A later outage therefore starts again at failure 1 instead of inheriting failures from hours earlier.
 
 A tunnel's SSH/TCP liveness is determined by its managed SSH process and loopback listener. An optional local HTTP URL reports the forwarded application's readiness separately: a timeout or `5xx` response marks the application degraded but never kills a healthy SSH tunnel or consumes its restart budget. When an existing reverse-proxy target maps to that tunnel, Local Ops also checks the complete `.localhost` URL, including its configured path. The UI reports the SSH link, application readiness, and **Domain Entry: Ready / Not Ready** separately. The complete entry is derived from the reverse-proxy configuration and is not duplicated in the SSH tunnel form.
 
@@ -163,13 +163,13 @@ npm ci
 npm run dmg
 ```
 
-The distributable is written to `desktop/dist/Local-Ops-1.8.5-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
+The distributable is written to `desktop/dist/Local-Ops-1.8.6-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
 
 Read [Development and Release Guide](docs/DEVELOPMENT.md) before changing packaging, native helpers, loopback bindings, or Electron security settings.
 
 ## Verification
 
-The v1.8.5 release gate covers syntax and unit tests, dynamic Caddy/PF port synchronization, bilingual static-copy coverage, configuration round trips, API security checks, trusted menu-bar actions and stop confirmation, desired-state preservation, managed-child reconciliation, duplicate-port protection, process-tree cleanup, service lifecycle and logs, SSH network gating with bounded retries, complete domain-entry checks, Caddy path routing, Docker state reads, encrypted-key Keychain integration, silent login-item startup, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, and mounted-DMG layout/signature checks. Unreleased refresh changes additionally require `npm run test:refresh-isolated`; passing this source-only gate does not imply that the App has been packaged or installed.
+The v1.8.6 release gate covers syntax and unit tests, isolated atomic-refresh acceptance, dynamic Caddy/PF port synchronization, bilingual static-copy coverage, configuration round trips, API security checks, trusted menu-bar actions and stop confirmation, desired-state preservation, managed-child reconciliation, duplicate-port protection, process-tree cleanup, service lifecycle and logs, per-tunnel consecutive-failure reset, complete domain-entry checks, Caddy path routing, Docker state reads, encrypted-key Keychain integration, silent login-item startup, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, and mounted-DMG layout/signature checks.
 
 Maintainers must consult [Authoritative Project Status](docs/PROJECT_STATUS.md) before describing a fix as public: the public GitHub release and the privately verified runtime can intentionally be at different commits. The repeatable verification sequence is in [Release and Hotfix Regression Manual](docs/RELEASE_REGRESSION.md).
 

@@ -1,13 +1,13 @@
-import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.8.5";
-import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.8.5";
+import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.8.6";
+import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.8.6";
 import {
   isDomainOnlyFailure,
   tunnelDisplayState,
   tunnelFailureMessage,
   tunnelPrimaryAction
-} from "./tunnel-ui.js?v=1.8.5";
-import { bootstrapConfigChanged } from "./resource-sync.js?v=1.8.5";
-import { createSnapshotRefreshCoordinator } from "./refresh-coordinator.js?v=1.8.5";
+} from "./tunnel-ui.js?v=1.8.6";
+import { bootstrapConfigChanged } from "./resource-sync.js?v=1.8.6";
+import { createSnapshotRefreshCoordinator } from "./refresh-coordinator.js?v=1.8.6";
 
 const LANGUAGE_STORAGE_KEY = "local-ops-language";
 setLocale(normalizeLocale(localStorage.getItem(LANGUAGE_STORAGE_KEY)));
@@ -653,6 +653,7 @@ function tunnelRuntimeDetails(process, displayState) {
     <div class="tunnel-layer-state"><small>${tr("域名入口")}</small><strong class="${entryClass}" title="${escapeAttribute(entry.target || entry.lastError || "")}">${escapeHtml(entryStatus)}</strong></div>
     <div><small>${tr("SSH 主机网络")}</small><strong title="${escapeAttribute(network.target || "")}">${escapeHtml(networkResult)}</strong></div>
     <div><small>${tr("隧道健康检查")}</small><strong title="${escapeAttribute(readiness.target || readiness.error || health.target || "")}">${escapeHtml(healthResult)}</strong></div>
+    <div><small>${tr("当前连续失败次数")}</small><strong title="${escapeAttribute(`${tr("自动重试上限")}：${Number(process.retryLimit || 10)}`)}">${Math.max(0, Number(process.retryCount || 0))}</strong></div>
   </div>`;
 }
 

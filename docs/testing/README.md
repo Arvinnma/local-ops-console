@@ -47,10 +47,20 @@ LOCAL_OPS_KEYCHAIN_HELPER=/tmp/local-ops-keychain-test npm run test:keychain
 ## 2026-08-10 迁移收尾复验
 
 - `project-foundation check`、`doctor`：通过，m-wiki 注册和项目入口可解析。
-- 2026-08-10 曾记录代码百科输入为 `stale`；该能力现已退役，不再是测试或发布门禁。
 - `project-foundation review-docs`：提交前因受审文档差异按设计返回 `review-needed`；提交后重新运行并记录真实结果。
 - `npm run check`：通过。
 - `npm test`：全量单元/回归测试通过。
 - `git diff --check`：通过。
 
 这是一条文档现场复验记录，不表示业务代码、安装 App 或生产运行态发生变化。
+
+## 2026-08-14 v1.8.6 发布回归
+
+- `npm run check`：通过；源码与桌面包版本均为 `1.8.6`。
+- `npm test`：135 项单元/回归测试全部通过。
+- `npm run test:keychain`：加密 Ed25519 私钥解锁成功，错误口令被拒绝。
+- `npm run test:refresh-isolated`：旧快照保留、离线写操作禁用与域名入口重试通过。
+- `npm run test:smoke`：安全边界、状态、服务、日志、会话恢复、排序、隧道、反代、终端操作、导出和 Docker 只读检查通过。
+- `npm run test:browser`：CSP、图标、操作菜单、SSH 四态动作、连续失败诊断字段与窄窗口横向滚动通过。
+- DMG SHA-256：`726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40`；`hdiutil verify`、ad-hoc 签名、arm64 架构和挂载布局通过。
+- 覆盖安装后 App 与运行后台均为 `1.8.6`，关键源码 SHA 一致；安装会重启控制面和既有 SSH Worker，因此已在无活动 Restic/传输任务时执行并保存旧 App 回滚副本。

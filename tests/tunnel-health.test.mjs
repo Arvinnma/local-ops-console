@@ -233,6 +233,89 @@ test("a running gate reports waiting for network instead of connected", async (t
   assert.equal(result.fullyAvailable, false);
 });
 
+test("managed wrapper phases expose consecutive failures instead of Process Compose lifetime restarts", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "local-ops-health-retries-"));
+  const stateFile = path.join(directory, "network.json");
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const now = Date.now();
+  fs.writeFileSync(stateFile, JSON.stringify({
+    wrapperPid: 12345,
+    phase: "retrying",
+    updatedAt: new Date(now).toISOString(),
+    consecutiveFailures: 4,
+    retryLimit: 10,
+    nextCheckAt: new Date(now + 3000).toISOString(),
+    error: "ssh: connection reset"
+  }));
+  const definition = tunnelDefinition("wrapper-retry-count", 18080);
+  const process = { ...runningProcess(), restarts: 99 };
+  const first = await enrichTunnelProcess(definition, process, {
+    now,
+    networkStateFile: stateFile
+  });
+  assert.equal(first.status, "retrying");
+  assert.equal(first.retryCount, 4);
+  assert.equal(first.retryLimit, 10);
+
+  resetTunnelRuntime(definition.id);
+  const afterServerRestart = await enrichTunnelProcess(definition, process, {
+    now: now + 1000,
+    networkStateFile: stateFile
+  });
+  assert.equal(afterServerRestart.retryCount, 4);
+  assert.equal(afterServerRestart.status, "retrying");
+});
+
+test("stabilizing wrapper state remains connecting and retains failures until confirmed", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "local-ops-health-stabilizing-"));
+  const stateFile = path.join(directory, "network.json");
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const now = Date.now();
+  fs.writeFileSync(stateFile, JSON.stringify({
+    wrapperPid: 12345,
+    phase: "stabilizing",
+    updatedAt: new Date(now).toISOString(),
+    consecutiveFailures: 3,
+    retryLimit: 10,
+    listenerCheck: { target: "127.0.0.1:18080", ok: true, latencyMs: 1, error: "" },
+    readinessCheck: { configured: true, mode: "http", target: "http://127.0.0.1:18080/", ok: true, statusCode: 200, latencyMs: 2, error: "" }
+  }));
+  const result = await enrichTunnelProcess(tunnelDefinition("stabilizing", 18080), runningProcess(), {
+    now,
+    networkStateFile: stateFile
+  });
+  assert.equal(result.status, "connecting");
+  assert.equal(result.retryCount, 3);
+  assert.equal(result.healthCheck.ok, true);
+  assert.equal(result.readinessCheck.ok, true);
+  assert.equal(result.fullyAvailable, false);
+});
+
+test("an exhausted live wrapper reports terminal failure with ten consecutive failures", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "local-ops-health-terminal-"));
+  const stateFile = path.join(directory, "network.json");
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const now = Date.now();
+  fs.writeFileSync(stateFile, JSON.stringify({
+    wrapperPid: 12345,
+    phase: "connection_failed",
+    updatedAt: new Date(now).toISOString(),
+    consecutiveFailures: 10,
+    retryLimit: 10,
+    error: "ssh: connect to host example.com port 22: Operation timed out"
+  }));
+  const result = await enrichTunnelProcess(tunnelDefinition("exhausted-wrapper", 18080), runningProcess(), {
+    now,
+    networkStateFile: stateFile
+  });
+  assert.equal(result.status, "connection_failed");
+  assert.equal(result.active, true);
+  assert.equal(result.retryCount, 10);
+  assert.equal(result.retryLimit, 10);
+  assert.match(result.lastConnectionError, /Operation timed out/);
+  assert.equal(result.nextRetryAt, null);
+});
+
 test("a management entry is fully available only when tunnel and domain checks both pass", async (t) => {
   const tunnelServer = http.createServer((_request, response) => {
     response.writeHead(200);
@@ -297,7 +380,7 @@ test("slow authentication-protected domain entries accept 401 and 403 responses"
   assert.equal(result.fullyAvailable, true);
 });
 
-test("a failed full-domain check stays connecting until the manual retry budget is exhausted", async (t) => {
+test("a failed full-domain check stays connecting until the ten-attempt budget is exhausted", async (t) => {
   let entryReady = false;
   let entryProbeCount = 0;
   const tunnelServer = http.createServer((_request, response) => {
@@ -327,7 +410,7 @@ test("a failed full-domain check stays connecting until the manual retry budget 
   assert.equal(result.healthCheck.ok, true);
   assert.equal(result.domainEntry.ready, false);
   assert.equal(result.domainEntry.retrying, true);
-  assert.equal(result.domainEntry.retryLimit, 3);
+  assert.equal(result.domainEntry.retryLimit, 10);
   assert.equal(result.fullyAvailable, false);
   assert.equal(result.health, "degraded");
   assert.equal(entryProbeCount, 1);
@@ -344,7 +427,7 @@ test("a failed full-domain check stays connecting until the manual retry budget 
   assert.equal(result.status, "retrying");
   assert.equal(entryProbeCount, 1);
 
-  for (let retry = 1; retry <= 3; retry += 1) {
+  for (let retry = 1; retry <= 10; retry += 1) {
     result = await enrichTunnelProcess(definition, runningProcess(), {
       now: startedAt + retry * 3000,
       entryRoutes: [{
@@ -357,15 +440,15 @@ test("a failed full-domain check stays connecting until the manual retry budget 
   }
   assert.equal(result.status, "connection_failed");
   assert.equal(result.domainEntry.terminal, true);
-  assert.equal(result.domainEntry.retryCount, 3);
-  assert.equal(entryProbeCount, 4);
+  assert.equal(result.domainEntry.retryCount, 10);
+  assert.equal(entryProbeCount, 11);
   assert.equal(
     result.nextRetryAt,
-    new Date(startedAt + 39_000).toISOString()
+    new Date(startedAt + 60_000).toISOString()
   );
 
   entryReady = true;
-  for (const elapsed of [10_000, 20_000, 38_000]) {
+  for (const elapsed of [35_000, 45_000, 59_000]) {
     result = await enrichTunnelProcess(definition, runningProcess(), {
       now: startedAt + elapsed,
       entryRoutes: [{
@@ -376,11 +459,11 @@ test("a failed full-domain check stays connecting until the manual retry budget 
       }]
     });
     assert.equal(result.status, "connection_failed");
-    assert.equal(entryProbeCount, 4);
+    assert.equal(entryProbeCount, 11);
   }
 
   result = await enrichTunnelProcess(definition, runningProcess(), {
-    now: startedAt + 39_000,
+    now: startedAt + 60_000,
     entryRoutes: [{
       id: "bad-panel-entry",
       name: "Panel",
@@ -393,10 +476,10 @@ test("a failed full-domain check stays connecting until the manual retry budget 
   assert.equal(result.domainEntry.terminal, undefined);
   assert.equal(result.domainEntry.lastError, "");
   assert.match(result.diagnostics.lastDomainError, /HTTP 404/);
-  assert.equal(entryProbeCount, 5);
+  assert.equal(entryProbeCount, 12);
 });
 
-test("startup-restored domain-entry checks use a 40-retry budget", async (t) => {
+test("legacy startup retry overrides are normalized to the ten-attempt budget", async (t) => {
   const tunnelServer = http.createServer((_request, response) => {
     response.writeHead(200);
     response.end("tunnel ready");
@@ -417,8 +500,8 @@ test("startup-restored domain-entry checks use a 40-retry budget", async (t) => 
     }]
   });
   assert.equal(result.status, "retrying");
-  assert.equal(result.domainEntry.retryLimit, 40);
-  assert.equal(result.retryLimit, 40);
+  assert.equal(result.domainEntry.retryLimit, 10);
+  assert.equal(result.retryLimit, 10);
 });
 
 test("extracts a useful SSH error from process logs", () => {

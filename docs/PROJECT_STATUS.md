@@ -4,7 +4,7 @@
 
 This file is the project-owned source of truth for the currently installed build, public distribution baseline, private verified baseline, and release-readiness behavior. Update it after every release or verified post-release hotfix. Roadmap ideas and external knowledge bases are not authoritative for shipped state.
 
-Status date: **2026-08-08**
+Status date: **2026-08-14**
 
 Source update date: **2026-08-14**
 
@@ -14,18 +14,16 @@ Source update date: **2026-08-14**
 
 | Scope | Version / commit | Meaning |
 | --- | --- | --- |
-| Installed application / runtime | App `1.8.4` | `/Applications/Local Ops.app`; v1.8.5 was built and published without replacing the currently running App or restarting managed SSH tunnels |
-| Public GitHub runtime baseline | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | Source commit behind the public `v1.8.5` tag and DMG |
-| Public `v1.8.5` DMG | SHA-256 `968e389d1a188b7bc8d24465215b49ba37714d2465ec6573749016308a2a6fd9` | Published GitHub Release artifact, Apple Silicon only |
-| Public `v1.8.5` tag | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | Immutable released source baseline |
-| Private Forgejo runtime baseline | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | Matches the public released runtime source and private `v1.8.5` tag |
-| Verified release DMG | SHA-256 `968e389d1a188b7bc8d24465215b49ba37714d2465ec6573749016308a2a6fd9` | `Local-Ops-1.8.5-arm64.dmg`; checksum, ad-hoc signature, arm64 architecture, mounted layout, version, bundled tools, dynamic PF template, and packaged desktop files verified |
+| Installed application / runtime | App and bundled backend `1.8.6` | `/Applications/Local Ops.app` and `/Users/arvin/.local/share/local-ops/.bundle-manifest.json`, verified after installing the release candidate |
+| Public GitHub runtime baseline | Tag `v1.8.6` | Source baseline published with the `v1.8.6` release |
+| Public `v1.8.6` DMG | SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` | GitHub Release artifact, Apple Silicon only |
+| Public `v1.8.6` tag | `v1.8.6` | Immutable released source baseline; resolve the tag for the exact commit |
+| Private Forgejo runtime baseline | Tag `v1.8.6` | Matches the public released runtime source and private tag |
+| Verified release DMG | SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` | `Local-Ops-1.8.6-arm64.dmg`; checksum, ad-hoc signature, arm64 architecture, mounted layout, version, bundled tools, and packaged desktop files verified |
 
-Documentation-only commits may advance either `main`; `3c37d96` remains the latest runtime-affecting baseline for both repositories.
+Documentation-only commits may advance either `main`; the immutable `v1.8.6` tag remains the released runtime baseline.
 
-The current source tree contains an unreleased refresh-consistency candidate while retaining package version `1.8.5`. It adds atomic catalog/state snapshots, serialized ordinary/forced refreshes, stale-snapshot protection, debounced menu-bar health decisions, a shared SSH action contract, and current-versus-historical error separation. Source checks, 122 unit/regression tests, and the isolated refresh acceptance pass. This candidate has not been packaged, installed, or runtime-verified against the production catalog; the installed App remains `1.8.4`, and the latest immutable public Release remains `v1.8.5`.
-
-The ProxyJump, resource-synchronization, SSH/readiness, managed-service lifecycle, menu-bar stop-safety, and configurable Caddy/PF port fixes are committed and packaged in v1.8.5. The currently installed App remains v1.8.4 because this release task deliberately built and published without replacing the live application.
+Version 1.8.6 ships the refresh-consistency work plus a per-tunnel consecutive-failure supervisor. Atomic catalog/state snapshots, serialized ordinary/forced refreshes, stale-snapshot protection, menu-bar health debounce, and a shared SSH action contract are now packaged and installed. Each tunnel gets ten consecutive attempts; listener readiness, optional HTTP readiness, and a ten-second stable window reset that tunnel's counter to zero so a later outage starts at one.
 
 ### Verified cold-start and SSH-readiness behavior
 
@@ -33,7 +31,8 @@ The ProxyJump, resource-synchronization, SSH/readiness, managed-service lifecycl
 - Aliases with `ProxyJump` or `ProxyCommand` delegate reachability to OpenSSH instead of incorrectly probing the final loopback endpoint. The runtime records `ssh-managed` / `delegated` with `ok: null`; the UI reports **Managed by SSH** rather than inventing a successful TCP probe.
 - An unavailable boot-time network remains **Connecting / Waiting for Network**. It does not report a false connection and does not use a fixed long sleep.
 - SSH uses `ConnectTimeout=5` and `ConnectionAttempts=1`; Process Compose retries at an approximately three-second cadence.
-- User-triggered starts have a three-retry budget. Previous-session restoration has a 40-retry budget.
+- Every managed SSH tunnel has an independent ten-consecutive-failure budget. Attempts 1 through 9 continue retrying at the existing cadence; the tenth failure is terminal until an explicit retry.
+- A successful child start does not reset the counter. Reset requires the SSH forward, local listener, optional HTTP readiness, and a ten-second stable window.
 - A configured tunnel HTTP health URL has a ten-second timeout and treats HTTP `100` through `499` as proof that the forwarded application responded.
 - SSH/TCP liveness is independent from optional HTTP application readiness. Repeated `503`, connection failure, or readiness timeout degrades the application signal without terminating the SSH process or consuming its restart budget.
 - A matching complete `.localhost` domain entry accepts `2xx`, `3xx`, `401`, and `403`. `401/403` prove that routing reached an authentication-protected application; they do **not** prove that user authentication succeeded.
@@ -57,11 +56,10 @@ The main-console synchronization fix was runtime-verified against nine configure
 
 ### Current limitations and follow-up
 
-- `/Applications/Local Ops.app` remains version 1.8.4 until the user explicitly installs the v1.8.5 DMG. The released v1.8.5 artifact contains the configurable Caddy/PF port fix.
-- Replacing the bundled backend currently restarts the Local Ops control plane. During the verified private installation this also restarted Process Compose worker SSH processes once. Schedule upgrades after active transfers complete until backend upgrades can preserve worker processes.
+- Replacing the bundled backend currently restarts the Local Ops control plane. The verified v1.8.6 installation restarted Process Compose worker SSH processes once, restored the remembered session, and reset stable tunnel counters to zero. Schedule upgrades after active transfers complete until backend upgrades can preserve worker processes.
 - Distribution remains Apple Silicon only, ad-hoc signed, and not notarized.
 - A terminal domain-entry probe runs every 30 seconds until recovery. This is intentionally low frequency, but it still sends a real HTTP request to the configured local entry.
-- The refresh-consistency candidate is source-verified only. Packaging, App replacement, and production PID/listener verification remain separate gates; a future release must use a new patch version rather than replacing `v1.8.5`.
+- Two configured speech-service tunnels remained in **Connecting** after installation because their application readiness checks were still failing even though their local TCP listeners were present. This is an upstream-readiness condition, not a duplicate SSH listener or a supervisor retry leak.
 
 Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandatory verification sequence.
 
@@ -71,18 +69,16 @@ Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandat
 
 | 范围 | 版本 / 提交 | 含义 |
 | --- | --- | --- |
-| 当前安装 App / 运行副本 | App `1.8.4` | `/Applications/Local Ops.app`；v1.8.5 只完成构建和发布，没有覆盖当前运行 App，也没有重启托管 SSH 隧道 |
-| 公开 GitHub 运行代码基线 | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | 公开 `v1.8.5` 标签和 DMG 对应的源码提交 |
-| 公开 `v1.8.5` DMG | SHA-256 `968e389d1a188b7bc8d24465215b49ba37714d2465ec6573749016308a2a6fd9` | GitHub Release 已发布制品，仅支持 Apple Silicon |
-| 公开 `v1.8.5` 标签 | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | 不可变的已发布源码基线 |
-| 私有 Forgejo 运行代码基线 | `3c37d965f2857ec8ef5ad8c193ad5bcb8c0baaa5` | 与公开已发布运行源码及私有 `v1.8.5` 标签一致 |
-| 已验证 Release DMG | SHA-256 `968e389d1a188b7bc8d24465215b49ba37714d2465ec6573749016308a2a6fd9` | `Local-Ops-1.8.5-arm64.dmg` 已通过校验和、ad-hoc 签名、arm64 架构、挂载布局、版本、内置工具、动态 PF 模板和桌面端打包文件检查 |
+| 当前安装 App / 运行副本 | App 与内置后台 `1.8.6` | `/Applications/Local Ops.app` 与 `/Users/arvin/.local/share/local-ops/.bundle-manifest.json`，已在安装候选包后核验 |
+| 公开 GitHub 运行代码基线 | 标签 `v1.8.6` | 随 `v1.8.6` Release 发布的源码基线 |
+| 公开 `v1.8.6` DMG | SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` | GitHub Release 制品，仅支持 Apple Silicon |
+| 公开 `v1.8.6` 标签 | `v1.8.6` | 不可变的已发布源码基线；精确提交以标签解析结果为准 |
+| 私有 Forgejo 运行代码基线 | 标签 `v1.8.6` | 与公开已发布运行源码及私有标签一致 |
+| 已验证 Release DMG | SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` | `Local-Ops-1.8.6-arm64.dmg` 已通过校验和、ad-hoc 签名、arm64 架构、挂载布局、版本、内置工具和桌面端打包文件检查 |
 
-后续纯文档提交可能继续推进任一 `main`；`3c37d96` 仍是两个仓库最新的运行代码基线。
+后续纯文档提交可能继续推进任一 `main`；不可变的 `v1.8.6` 标签仍是已发布运行代码基线。
 
-当前源码树包含一批尚未发布的刷新一致性候选，同时包版本仍保持 `1.8.5`。它新增原子 catalog/state 快照、普通/强制刷新串行化、旧快照保护、菜单栏健康去抖、统一 SSH 动作契约，以及当前错误与历史错误分层。源码静态检查、122 项单元/回归测试和隔离刷新验收均已通过；这批候选尚未打包、安装，也没有针对生产 catalog 做运行验收。当前安装 App 仍是 `1.8.4`，最新不可变公开 Release 仍是 `v1.8.5`。
-
-ProxyJump、资源同步、SSH/readiness、托管服务生命周期、菜单栏停止安全和 Caddy/PF 可配置端口修复都已提交并打入 v1.8.5。当前安装 App 仍是 v1.8.4，因为本次发布任务刻意只构建并发布，没有覆盖现网 App。
+v1.8.6 正式包含刷新一致性修复和逐隧道连续失败监督器：原子 catalog/state 快照、普通/强制刷新串行化、旧快照保护、菜单栏健康去抖和统一 SSH 动作契约均已打包并安装。每条隧道独立拥有 10 次连续失败额度；本地监听、可选 HTTP readiness 与 10 秒稳定窗口通过后，该隧道计数清零，后续新故障从 1 开始。
 
 ### 已验证的冷启动与 SSH readiness 行为
 
@@ -90,7 +86,8 @@ ProxyJump、资源同步、SSH/readiness、托管服务生命周期、菜单栏�
 - 带 `ProxyJump` 或 `ProxyCommand` 的别名由 OpenSSH 自己判断完整链路，不再错误探测最终的回环端点。运行状态记录 `ssh-managed` / `delegated` 和 `ok: null`，界面显示“由 SSH 建立”，不会伪造 TCP 探测成功。
 - 开机网络尚未就绪时保持“连接中 / 等待网络”，不误报已连接，也不使用固定长时间 `sleep`。
 - SSH 使用 `ConnectTimeout=5`、`ConnectionAttempts=1`，Process Compose 约每 3 秒发起下一轮。
-- 人工触发最多重试 3 次；恢复上次会话最多重试 40 次。
+- 每条托管 SSH 隧道独立拥有 10 次连续失败额度；第 1–9 次继续按现有节奏重试，第 10 次才进入终态并等待显式重试。
+- SSH 子进程刚启动不会提前清零。必须完成转发、本地监听、可选 HTTP readiness 和 10 秒稳定窗口后才归零。
 - 隧道 HTTP 健康地址的超时为 10 秒；收到 HTTP `100–499` 说明转发后的应用已经响应。
 - SSH/TCP 存活与可选 HTTP 应用就绪已经分离。连续 `503`、连接失败或 readiness 超时只把应用标成降级，不结束 SSH 进程，也不消耗 SSH 重启额度。
 - 匹配到的完整 `.localhost` 域名入口接受 `2xx`、`3xx`、`401` 和 `403`。`401/403` 只证明请求到达了受认证保护的应用，不代表用户认证已经成功。
@@ -114,10 +111,9 @@ ProxyJump、资源同步、SSH/readiness、托管服务生命周期、菜单栏�
 
 ### 尚未解决与后续事项
 
-- `/Applications/Local Ops.app` 在用户明确安装 v1.8.5 DMG 前仍是 1.8.4；新发布的 v1.8.5 制品已经包含 Caddy/PF 可配置端口修复。
-- 当前替换内置后台会重启 Local Ops 控制面。私有制品安装验收时，Process Compose Worker 下的 SSH 进程也随之重启过一次。在升级流程能够保留 Worker 前，应避开正在进行的数据传输。
+- 当前替换内置后台会重启 Local Ops 控制面。v1.8.6 安装验收时，Process Compose Worker 下的 SSH 进程随之重启一次，记忆会话恢复，稳定隧道计数回到 0。在升级流程能够保留 Worker 前，应避开正在进行的数据传输。
 - 当前只提供 Apple Silicon 包，使用 ad-hoc 签名，尚未公证。
 - 终态恢复期间每 30 秒会向配置的本地域名入口发送一次真实 HTTP 请求；频率已刻意降低，但并非零流量。
-- 刷新一致性候选目前只完成源码验证。打包、替换 App 与生产 PID/listener 验收仍是独立门禁；未来发布必须使用新的 patch 版本，不能覆盖既有 `v1.8.5`。
+- 安装后有两条语音服务隧道仍处于“连接中”：本地 TCP listener 已存在，但其应用 readiness 尚未通过。这属于上游应用就绪问题，不是重复 SSH listener 或监督器重试泄漏。
 
 强制回归流程见[发布与热修回归手册](RELEASE_REGRESSION.md)。

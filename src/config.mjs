@@ -3,6 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  TUNNEL_RETRY_BACKOFF_MS,
+  TUNNEL_RETRY_LIMIT,
+  TUNNEL_STABLE_WINDOW_MS
+} from "./tunnel-retry-state.mjs";
+
+export { TUNNEL_RETRY_LIMIT, TUNNEL_STABLE_WINDOW_MS } from "./tunnel-retry-state.mjs";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(HERE, "..");
 export const CATALOG_PATH = path.join(ROOT, "config", "catalog.json");
@@ -32,9 +40,9 @@ export const PORTABLE_CONFIG_FORMAT = "local-ops-portable-config";
 export const PORTABLE_CONFIG_VERSION = 1;
 export const SSH_CONNECT_TIMEOUT_SECONDS = 5;
 export const SSH_CONNECTION_ATTEMPTS = 1;
-export const TUNNEL_RESTART_BACKOFF_SECONDS = 3;
-export const TUNNEL_STARTUP_RETRY_LIMIT = 40;
-export const TUNNEL_MANUAL_RETRY_LIMIT = 3;
+export const TUNNEL_RESTART_BACKOFF_SECONDS = TUNNEL_RETRY_BACKOFF_MS / 1000;
+export const TUNNEL_STARTUP_RETRY_LIMIT = TUNNEL_RETRY_LIMIT;
+export const TUNNEL_MANUAL_RETRY_LIMIT = TUNNEL_RETRY_LIMIT;
 
 const PORTABLE_BOOLEAN_SETTING_KEYS = [
   "launchAppAtLogin",
@@ -412,10 +420,8 @@ export function tunnelNetworkStatePath(id) {
 }
 
 export function tunnelRetryLimit(value) {
-  const requested = Number(typeof value === "object" ? value?.retryLimit : value);
-  return requested === TUNNEL_STARTUP_RETRY_LIMIT
-    ? TUNNEL_STARTUP_RETRY_LIMIT
-    : TUNNEL_MANUAL_RETRY_LIMIT;
+  void value;
+  return TUNNEL_RETRY_LIMIT;
 }
 
 export function renderSshCommand(inputArgs, passphraseRef = "", background = false) {
@@ -586,7 +592,6 @@ export function renderWorkerCompose(catalog, options = {}) {
       description: tunnel.description || tunnel.name,
       restart: "always",
       backoffSeconds: TUNNEL_RESTART_BACKOFF_SECONDS,
-      maxRestarts: retryLimit,
       disabled: true
     });
   }
@@ -705,6 +710,10 @@ function managedTunnelCommand(tunnel, sshCommand, stateFile, retryLimit) {
     "--lifecycle", shellQuote(PROCESS_LIFECYCLE_PATH),
     "--host", shellQuote(tunnel.sshHost),
     "--port", shellQuote(String(tunnel.sshPort || 22)),
+    "--bind-address", shellQuote(tunnel.bindAddress || "127.0.0.1"),
+    "--local-port", shellQuote(String(tunnel.localPort)),
+    "--health-url", shellQuote(tunnel.healthUrl || ""),
+    "--stable-window-ms", shellQuote(String(TUNNEL_STABLE_WINDOW_MS)),
     "--retry-limit", shellQuote(String(retryLimit)),
     "--destination", shellQuote(`${tunnel.sshUser}@${tunnel.sshHost}`),
     "--ssh-binary", shellQuote(BINARIES.ssh),

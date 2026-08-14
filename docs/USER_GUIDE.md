@@ -2,13 +2,13 @@
 
 [简体中文](USER_GUIDE.zh-CN.md) · [Project README](../README.md) · [Security](../SECURITY.md)
 
-This guide applies to Local Ops v1.8.5 on Apple Silicon macOS.
+This guide applies to Local Ops v1.8.6 on Apple Silicon macOS.
 
 ## 1. Install, update, and open
 
 ### Install
 
-1. Download `Local-Ops-1.8.5-arm64.dmg` from GitHub Releases.
+1. Download `Local-Ops-1.8.6-arm64.dmg` from GitHub Releases.
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch the app from Applications.
 
@@ -125,7 +125,7 @@ Via deploy@203.0.113.10
 Local listener 127.0.0.1:3000  →  Forward target 127.0.0.1:3000
 ```
 
-Local Ops automatically adds `-NT`, `IdentitiesOnly`, `ExitOnForwardFailure`, `ConnectTimeout=5`, `ConnectionAttempts=1`, and keepalive options. Managed listeners bind to `127.0.0.1` only. A failed or timed-out SSH attempt exits, then Process Compose waits about three seconds before the next attempt; Local Ops does not add a long fixed boot delay. The tunnel form no longer has a scheduler-autostart option: starts from the web UI, menu bar, or bulk controls retry up to 3 times, while tunnels restored by **Restore the Previous Session When the App Opens** retry up to 40 times.
+Local Ops automatically adds `-NT`, `IdentitiesOnly`, `ExitOnForwardFailure`, `ConnectTimeout=5`, `ConnectionAttempts=1`, and keepalive options. Managed listeners bind to `127.0.0.1` only. A failed or timed-out SSH attempt exits and the per-tunnel supervisor waits about three seconds before the next attempt; Local Ops does not add a long fixed boot delay. Each tunnel has an independent limit of 10 consecutive failures. A successful child start alone does not clear the counter: the forward, loopback listener, optional HTTP readiness check, and a ten-second stability window must all pass first.
 
 Before starting SSH automatically, Local Ops runs `ssh -G` to read the effective host configuration. An alias such as `frp-relay-01` is therefore resolved to its real `HostName/Port` first. Every connection round probes that endpoint first. An unreachable endpoint fails that round quickly, keeps the card **Connecting**, and reports the network wait under **SSH Host Network**. Process Compose starts the next round about three seconds later and enters SSH setup immediately once the endpoint recovers.
 
@@ -145,7 +145,7 @@ A listening local port proves only that the managed SSH forward exists; it does 
 Application-readiness failures never terminate a still-live SSH process, never consume its Process Compose restart budget, and continue to be checked until the application recovers.
 
 - **Connecting**: includes waiting for network, establishing SSH, automatic retries, and a manual immediate retry. The primary button is disabled and stale error text is hidden.
-- **Connection Failed**: all 40 startup-restoration retries or all 3 manual retries ended without passing verification. The card shows the specific error and enables a yellow **Retry Now** button. Clicking it is a manual action and begins a new three-retry budget.
+- **Connection Failed**: 10 consecutive attempts ended without passing verification. The card shows the specific error and enables a yellow **Retry Now** button. Clicking it starts a new bounded cycle. After a stable connection clears the counter, a later outage starts again at failure 1.
 - **Connected**: the SSH/TCP tunnel is live. The separate Tunnel Health Check can still report **Not Ready** when an optional HTTP application check is degraded. When a matching domain entry is configured, that entry must also be ready before the card reaches its fully available state.
 - **Stopped**: the tunnel is disabled; its SSH process and local listener should be absent.
 
@@ -160,7 +160,7 @@ The card reports **Connected** only when every configured layer above passes. If
 
 The entry comes from the existing reverse-proxy configuration. It is never hard-coded for one project and does not add a duplicate field to the SSH tunnel form.
 
-Domain-entry failures follow the active 3- or 40-probe presentation budget, but they do not consume Process Compose restart attempts or terminate the SSH process. Exhausting that budget reports **Connection Failed**, but it no longer permanently locks the card: Local Ops performs one low-frequency recovery probe every 30 seconds. When the domain entry responds again, the same healthy SSH process automatically returns to **Connected**. UI refreshes inside that interval reuse the recorded result instead of hammering a busy service.
+Domain-entry failures use the bounded presentation/recovery policy, but they do not consume SSH consecutive-failure attempts or terminate the SSH process. Exhausting that budget reports **Connection Failed**, but it no longer permanently locks the card: Local Ops performs one low-frequency recovery probe every 30 seconds. When the domain entry responds again, the same healthy SSH process automatically returns to **Connected**. UI refreshes inside that interval reuse the recorded result instead of hammering a busy service.
 
 ### Desired state and stop audit
 

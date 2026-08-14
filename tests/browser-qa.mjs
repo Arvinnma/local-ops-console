@@ -116,7 +116,7 @@ try {
   assert.ok(tunnels.length > 0, "No SSH tunnel cards rendered");
   for (const tunnel of tunnels) {
     assert.ok(tunnel.state, `Tunnel exposed an unsupported state: ${JSON.stringify(tunnel)}`);
-    assert.equal(tunnel.diagnosticCount, 4, "Tunnel cards must retain exactly four diagnostic fields");
+    assert.equal(tunnel.diagnosticCount, 5, "Tunnel cards must expose health diagnostics plus the consecutive-failure counter");
     assert.equal(tunnel.hasError, tunnel.state === "connection_failed", "Only final tunnel failures may display error text");
     if (tunnel.state === "connecting") {
       assert.equal(tunnel.primaryDisabled, true, "Connecting tunnel action must be disabled");

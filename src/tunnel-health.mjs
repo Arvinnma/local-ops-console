@@ -33,7 +33,10 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
   );
   definition = {
     ...definition,
-    retryLimit: tunnelRetryLimit(options.retryLimit ?? networkState?.retryLimit)
+    retryLimit: tunnelRetryLimit(options.retryLimit ?? networkState?.retryLimit),
+    consecutiveFailures: Number.isFinite(Number(networkState?.consecutiveFailures))
+      ? Math.max(0, Number(networkState.consecutiveFailures))
+      : null
   };
   const networkCheck = networkCheckDescriptor(definition, networkState);
 
@@ -144,6 +147,50 @@ export async function enrichTunnelProcess(definition, process, options = {}) {
       readinessCheck: readinessCheckDescriptor(definition),
       networkCheck,
       domainEntry: unavailableDomainEntry(entryRoutes, "正在等待 SSH 网络")
+    });
+  }
+
+  if (["retrying", "ssh_exited"].includes(networkState?.phase)) {
+    runtime.connected = false;
+    runtime.nextRetryAt = networkState.nextCheckAt || new Date(now + TUNNEL_RESTART_BACKOFF_SECONDS * 1000).toISOString();
+    rememberError(runtime, networkState.error || "SSH 连接失败，等待自动重试", now);
+    return tunnelResult(definition, process, runtime, {
+      status: "retrying",
+      active: true,
+      health: "unhealthy",
+      healthCheck: networkHealthDescriptor(definition, networkState),
+      readinessCheck: networkReadinessDescriptor(definition, networkState),
+      networkCheck,
+      domainEntry: unavailableDomainEntry(entryRoutes, "SSH 隧道正在重试")
+    });
+  }
+
+  if (networkState?.phase === "connection_failed") {
+    runtime.connected = false;
+    runtime.nextRetryAt = null;
+    rememberError(runtime, networkState.error || "SSH 隧道连续失败次数已达到上限", now);
+    return tunnelResult(definition, process, runtime, {
+      status: "connection_failed",
+      active: true,
+      health: "unhealthy",
+      healthCheck: networkHealthDescriptor(definition, networkState),
+      readinessCheck: networkReadinessDescriptor(definition, networkState),
+      networkCheck,
+      domainEntry: unavailableDomainEntry(entryRoutes, "SSH 隧道连接失败")
+    });
+  }
+
+  if (["connecting", "stabilizing"].includes(networkState?.phase)) {
+    runtime.connected = false;
+    runtime.nextRetryAt = null;
+    return tunnelResult(definition, process, runtime, {
+      status: "connecting",
+      active: true,
+      health: networkState.phase === "stabilizing" ? "waiting" : "unhealthy",
+      healthCheck: networkHealthDescriptor(definition, networkState),
+      readinessCheck: networkReadinessDescriptor(definition, networkState),
+      networkCheck,
+      domainEntry: unavailableDomainEntry(entryRoutes, "SSH 隧道正在确认稳定状态")
     });
   }
 
@@ -365,8 +412,10 @@ function tunnelResult(definition, process, runtime, overrides) {
     lastConnectionError: connectionFailureActive ? historicalConnectionError : "",
     lastConnectionErrorAt: connectionFailureActive ? runtime.lastErrorAt : null,
     lastConnectedAt: runtime.lastSuccessAt,
-    retryCount: Number(process.restarts || 0),
-    retryLimit: tunnelRetryLimit(definition),
+    retryCount: definition.consecutiveFailures == null
+      ? Number(process.restarts || 0)
+      : definition.consecutiveFailures,
+    retryLimit: Number(definition.retryLimit || tunnelRetryLimit(definition)),
     nextRetryAt: runtime.nextRetryAt,
     networkCheck: overrides.networkCheck || networkCheckDescriptor(definition, null),
     healthCheck: overrides.healthCheck || runtime.lastProbe || healthCheckDescriptor(definition),
@@ -406,6 +455,32 @@ function readinessCheckDescriptor(definition) {
     statusCode: null,
     latencyMs: null,
     error: ""
+  };
+}
+
+function networkHealthDescriptor(definition, state) {
+  const check = state?.listenerCheck || {};
+  return {
+    mode: "tcp",
+    target: check.target || `tcp://${definition.bindAddress || "127.0.0.1"}:${definition.localPort}`,
+    ok: Boolean(check.ok),
+    statusCode: null,
+    latencyMs: check.latencyMs ?? null,
+    error: check.error || ""
+  };
+}
+
+function networkReadinessDescriptor(definition, state) {
+  const check = state?.readinessCheck;
+  if (!check || typeof check !== "object") return readinessCheckDescriptor(definition);
+  return {
+    configured: Boolean(check.configured),
+    mode: check.mode || (check.configured ? "http" : "none"),
+    target: check.target || definition.healthUrl || "",
+    ok: Boolean(check.ok),
+    statusCode: check.statusCode ?? null,
+    latencyMs: check.latencyMs ?? null,
+    error: check.error || ""
   };
 }
 

@@ -13,7 +13,7 @@ git rev-parse HEAD
 git remote -v
 git ls-remote forgejo refs/heads/main
 git ls-remote origin refs/heads/main
-git rev-parse 'v1.8.5^{}'
+git rev-parse 'v1.8.6^{}'
 ```
 
 Record these separately:
@@ -72,12 +72,14 @@ Verify:
 2. With the SSH endpoint unavailable, the card says **Connecting / Waiting for Network** and never **Connected**.
 3. There is no fixed long startup sleep.
 4. Each SSH attempt contains `ConnectTimeout=5` and `ConnectionAttempts=1`.
-5. Process Compose starts the next round at roughly three-second intervals.
-6. A user-triggered start stops after 3 failed attempts.
-7. Previous-session restoration allows 40 attempts.
-8. When the endpoint becomes reachable, the next retry connects without manual intervention.
-9. Only one SSH process owns the configured local listener.
-10. Stopping the tunnel removes both the SSH process and listener.
+5. The per-tunnel supervisor starts the next round at roughly three-second intervals.
+6. Attempts 1 through 9 remain retryable; the tenth consecutive failure enters the terminal state.
+7. The counter is independent for every tunnel and survives a supervisor restart without silently granting a fresh budget.
+8. A child start does not reset the counter before the local listener, optional health URL, and ten-second stability window succeed.
+9. After the stable window, the counter is zero; a later outage starts at failure 1.
+10. When the endpoint becomes reachable, the next retry connects without manual intervention.
+11. Only one SSH process owns the configured local listener.
+12. Stopping the tunnel removes both the SSH process and listener.
 
 ## 4. Liveness and HTTP readiness matrix
 
