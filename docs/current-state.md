@@ -1,6 +1,6 @@
 # 当前状态
 
-> 状态：权威源码正在准备 1.8.7 本机修复；公开 Release 与当前安装版仍为 v1.8.6
+> 状态：权威源码与当前安装版均为 1.8.7；公开 GitHub Release 正在完成不可变标签与制品登记
 
 状态日期：2026-08-15
 
@@ -9,15 +9,15 @@
 | 项目 | 当前事实 |
 | --- | --- |
 | project_id | `local-ops-console` |
-| 软件源码版本 | `1.8.7`，尚未创建公开 Release，尚未覆盖当前安装版 |
+| 软件源码版本 | `1.8.7`，功能修复已提交并同步两个 `main`；发布文档与不可变标签在本轮收尾 |
 | 权威源码仓库 | `/Users/arvin/Documents/AI/codex/local-ops-console` |
 | 旧源码仓库 | `/Users/arvin/Documents/Codex/projects/local-ops/local-ops-console`，只读保留 |
 | 当前分支 | `main` |
-| 公开 GitHub `origin/main` | 发布后与本地 `main` 一致；精确 SHA 以 `git ls-remote origin refs/heads/main` 为准 |
-| 私有 Forgejo `forgejo/main` | 发布后与本地 `main` 一致；精确 SHA 以 `git ls-remote forgejo refs/heads/main` 为准 |
-| 公开 / 私有发布标签 | `v1.8.6`，两个远端必须解析到同一发布提交 |
-| GitHub Release | `v1.8.6`，Apple Silicon DMG SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` |
-| 当前安装 App | `/Applications/Local Ops.app`，本轮覆盖前仍为已核验的 `1.8.6` |
+| 公开 GitHub `origin/main` | 与本地 `main` 同步；精确 SHA 以 `git ls-remote origin refs/heads/main` 为准 |
+| 私有 Forgejo `forgejo/main` | 与本地 `main` 同步；精确 SHA 以 `git ls-remote forgejo refs/heads/main` 为准 |
+| 公开 / 私有发布标签 | 本轮创建 `v1.8.7`，两个远端必须解析到同一发布提交 |
+| GitHub Release | `v1.8.7`，Apple Silicon DMG SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` |
+| 当前安装 App | `/Applications/Local Ops.app`，App 与安装后台均已核验为 `1.8.7` |
 | m-wiki | `/Users/arvin/Documents/AI/m-wiki/项目/local-ops-console/` 已注册并解析到权威源码路径 |
 | 项目文档 | README、`docs/`、源码和测试共同构成当前事实；m-wiki 仅链接这些项目文件 |
 
@@ -47,18 +47,20 @@
 - `project-foundation doctor`：通过；项目与 m-wiki 注册可解析。
 - `project-foundation review-docs`：Project Foundation V6 Lite 已移除此命令；当前返回 `deprecated`，不再作为发布门禁。
 - `npm run check`：通过。
-- `npm test`：135 项单元/回归测试通过。
+- `npm test`：155 项单元/回归测试通过。
 - `git diff --check`：通过。
 - `npm run test:keychain`、`npm run test:refresh-isolated`、`npm run test:smoke` 和 `npm run test:browser`：通过。
-- v1.8.6 DMG 已通过 SHA-256、`hdiutil verify`、ad-hoc 签名、arm64 架构和挂载布局验证。
+- v1.8.7 DMG 已通过 SHA-256、`hdiutil verify`、ad-hoc 签名、arm64 架构、版本和挂载布局验证。
 - 覆盖安装前没有活动 `restic`、`rclone`、`rsync`、`scp` 或 `sftp` 数据任务；安装后 App 与后台关键源码 SHA 一致，所有本地 SSH listener 保持唯一。
+- 覆盖安装重启一次控制面与 Process Compose Worker；8 个预期 SSH listener 唯一恢复，记忆会话中 8 条隧道重新连接，3 条期望停止的隧道保持停止。
+- `panel`、`monitor`、Forgejo 与 `console.localhost` 返回 `200`；Documents 与 Identity 入口返回预期 `401`。系统 PF Helper 配置与 19080→80 规则同步，无端口控制台入口返回 `200`。
 - 强模式秘密扫描：迁移文档与配置未发现私钥正文、长 Bearer Token、GitHub Token、AWS Access Key、OpenAI Key 或明文密码赋值。
 
 ## 已知限制
 
 - 当前仅提供 Apple Silicon、ad-hoc 签名且未公证的安装包。
 - 覆盖安装内置后台仍会重启控制面和 Process Compose Worker；本次安装中的 SSH PID 因此全部更新，但没有出现重复 listener。
-- 两条语音服务隧道在安装后仍等待其上游 HTTP readiness；TCP 转发已建立。该状态不会提前清零连续失败计数，也不会被误报为完全可用。
+- 配置了应用或完整域名检查的隧道可能显示“服务未就绪”或“入口未就绪”；这代表 SSH 转发仍存活但上层 readiness 未通过，并保留显式停止操作。
 
 ## 恢复点
 

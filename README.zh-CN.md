@@ -28,7 +28,7 @@ Local Ops 把 Electron 桌面 App、浏览器控制台、Process Compose 和 Cad
 - Docker 功能可选；使用时需要安装 Docker Desktop
 - 系统自带 Terminal.app；iTerm2 为可选项
 
-v1.8.6 暂不提供 Intel（`x64`）安装包。
+v1.8.7 暂不提供 Intel（`x64`）安装包。
 
 ## 功能一览
 
@@ -49,7 +49,7 @@ v1.8.6 暂不提供 Intel（`x64`）安装包。
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Arvinnma/local-ops-console/releases/latest) 下载 `Local-Ops-1.8.6-arm64.dmg`。
+1. 从 [Releases](https://github.com/Arvinnma/local-ops-console/releases/latest) 下载 `Local-Ops-1.8.7-arm64.dmg`。
 2. 打开 DMG，把 **Local Ops** 拖到“应用程序”。
 3. 从“应用程序”启动 **Local Ops**。
 
@@ -159,13 +159,13 @@ npm ci
 npm run dmg
 ```
 
-安装包输出到 `desktop/dist/Local-Ops-1.8.6-arm64.dmg`。打包步骤会把当前 Caddy 与 Process Compose 二进制复制进 App。
+安装包输出到 `desktop/dist/Local-Ops-1.8.7-arm64.dmg`。打包步骤会把当前 Caddy 与 Process Compose 二进制复制进 App。
 
 修改打包、原生 Helper、回环监听或 Electron 安全设置前，请先阅读[开发与发布文档](docs/DEVELOPMENT.md)。
 
 ## 发布验收
 
-v1.8.6 发布门禁覆盖：语法和单元测试、隔离原子刷新验收、Caddy/PF 动态端口同步、中英文静态文案覆盖、配置往返、API 安全校验、可信菜单栏操作与停止确认、期望状态保留、真实子进程对账、重复端口保护、进程树清理、服务生命周期与日志、每隧道连续失败计数归零、完整域名入口检查、Caddy 路径路由、Docker 容器读取、加密私钥钥匙串集成、登录项静默启动、菜单栏重复恢复窗口、窄窗口浏览器 QA、App 签名与架构，以及挂载 DMG 的布局/签名检查。
+v1.8.7 发布门禁覆盖：语法和单元测试、隔离原子刷新验收、后台刷新不冻结按钮且不闪烁、SSH/应用/域名入口分层状态、Caddy/PF 动态端口同步、有预算的事件驱动 PF 自愈、中英文静态文案覆盖、配置往返、API 安全校验、可信菜单栏操作与停止确认、期望状态保留、真实子进程对账、重复端口保护、进程树清理、服务生命周期与日志、每隧道连续失败计数归零、完整域名入口检查、Caddy 路径路由、Docker 容器读取、加密私钥钥匙串集成、登录项静默启动、菜单栏重复恢复窗口、窄窗口浏览器 QA、App 签名与架构，以及挂载 DMG 的布局/签名检查。
 
 维护者在对外描述修复前必须先查看[项目权威状态](docs/PROJECT_STATUS.md)：公开 GitHub Release 与私有已验证运行基线可能处于不同提交。可重复执行的验收步骤见[发布与热修回归手册](docs/RELEASE_REGRESSION.md)。
 

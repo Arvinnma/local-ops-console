@@ -4,6 +4,8 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ## [Unreleased]
 
+## [1.8.7] - 2026-08-15
+
 ### Added
 
 - Add event-driven recovery for macOS portless access. Local Ops now repairs the Apple PF main rules before requesting its child anchor only when the configured Caddy port is healthy, loopback port 80 is unavailable, and the installed helper configuration is synchronized.
@@ -172,6 +174,7 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 - Added the self-contained Electron DMG, automatic backend installation, portless loopback access, and bundled Caddy / Process Compose binaries.
 
 [1.7.0]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.7.0
+[1.8.7]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.7
 [1.8.6]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.6
 [1.8.5]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.5
 [1.8.4]: https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.4

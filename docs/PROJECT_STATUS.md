@@ -14,17 +14,17 @@ Source update date: **2026-08-15**
 
 | Scope | Version / commit | Meaning |
 | --- | --- | --- |
-| Source workspace | `1.8.7` working tree | Portless PF recovery and degraded-tunnel presentation are under final delivery; no public `v1.8.7` Release exists |
-| Installed application / runtime | App and bundled backend `1.8.6` | `/Applications/Local Ops.app` and `/Users/arvin/.local/share/local-ops/.bundle-manifest.json`; the 1.8.7 source has not yet replaced it |
-| Public GitHub runtime baseline | Tag `v1.8.6` | Source baseline published with the `v1.8.6` release |
-| Public `v1.8.6` DMG | SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` | GitHub Release artifact, Apple Silicon only |
-| Public `v1.8.6` tag | `v1.8.6` | Immutable released source baseline; resolve the tag for the exact commit |
-| Private Forgejo runtime baseline | Tag `v1.8.6` | Matches the public released runtime source and private tag |
-| Verified release DMG | SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` | `Local-Ops-1.8.6-arm64.dmg`; checksum, ad-hoc signature, arm64 architecture, mounted layout, version, bundled tools, and packaged desktop files verified |
+| Source workspace | `1.8.7` | Portless PF recovery, non-blocking refresh, and degraded-tunnel presentation are delivered and verified |
+| Installed application / runtime | App and bundled backend `1.8.7` | `/Applications/Local Ops.app` and `/Users/arvin/.local/share/local-ops/.bundle-manifest.json` |
+| Public GitHub runtime baseline | Tag `v1.8.7` | Immutable source baseline for the `v1.8.7` release |
+| Public `v1.8.7` DMG | SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` | GitHub Release artifact, Apple Silicon only |
+| Public `v1.8.7` tag | `v1.8.7` | Immutable released source baseline; resolve the tag for the exact commit |
+| Private Forgejo runtime baseline | Tag `v1.8.7` | Matches the public released runtime source and private tag |
+| Verified release DMG | SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` | `Local-Ops-1.8.7-arm64.dmg`; checksum, ad-hoc signature, arm64 architecture, mounted layout, version, bundled tools, and packaged desktop files verified |
 
-Documentation-only commits may advance either `main`; the immutable `v1.8.6` tag remains the released runtime baseline.
+Documentation-only commits may advance either `main`; the immutable `v1.8.7` tag remains the released runtime baseline.
 
-Version 1.8.6 ships the refresh-consistency work plus a per-tunnel consecutive-failure supervisor. Atomic catalog/state snapshots, serialized ordinary/forced refreshes, stale-snapshot protection, menu-bar health debounce, and a shared SSH action contract are packaged and installed. The 1.8.7 source additionally adds bounded event-driven PF recovery and separates live SSH forwarding from unavailable application/domain readiness; it is not yet a public Release or installed baseline.
+Version 1.8.7 ships atomic refresh without periodic control freezing or full-view flicker, a per-tunnel consecutive-failure supervisor, bounded event-driven PF recovery, and distinct states for live SSH forwarding versus unavailable application/domain readiness. The App, bundled backend, runtime manifest, privileged helper configuration, and representative loopback entries were verified after installation.
 
 ### Verified cold-start and SSH-readiness behavior
 
@@ -57,10 +57,10 @@ The main-console synchronization fix was runtime-verified against nine configure
 
 ### Current limitations and follow-up
 
-- Replacing the bundled backend currently restarts the Local Ops control plane. The verified v1.8.6 installation restarted Process Compose worker SSH processes once, restored the remembered session, and reset stable tunnel counters to zero. Schedule upgrades after active transfers complete until backend upgrades can preserve worker processes.
+- Replacing the bundled backend currently restarts the Local Ops control plane. The verified v1.8.7 installation restarted Process Compose worker SSH processes once, restored the remembered session, and reset stable tunnel counters to zero. Schedule upgrades after active transfers complete until backend upgrades can preserve worker processes.
 - Distribution remains Apple Silicon only, ad-hoc signed, and not notarized.
 - A terminal domain-entry probe runs every 30 seconds until recovery. This is intentionally low frequency, but it still sends a real HTTP request to the configured local entry.
-- Two configured speech-service tunnels remained in **Connecting** after installation because their application readiness checks were still failing even though their local TCP listeners were present. This is an upstream-readiness condition, not a duplicate SSH listener or a supervisor retry leak.
+- When an SSH forward is established but application or complete-domain readiness is unavailable, the UI reports **Service Not Ready** or **Entry Not Ready** and retains Stop. This is an upstream-readiness condition, not a duplicate SSH listener or supervisor retry leak.
 
 Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandatory verification sequence.
 
@@ -70,17 +70,17 @@ Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandat
 
 | 范围 | 版本 / 提交 | 含义 |
 | --- | --- | --- |
-| 权威源码工作区 | `1.8.7` 工作树 | 正在交付 PF 无端口自愈与隧道降级状态；尚未创建公开 `v1.8.7` Release |
-| 当前安装 App / 运行副本 | App 与内置后台 `1.8.6` | `/Applications/Local Ops.app` 与 `/Users/arvin/.local/share/local-ops/.bundle-manifest.json`；1.8.7 源码尚未覆盖安装 |
-| 公开 GitHub 运行代码基线 | 标签 `v1.8.6` | 随 `v1.8.6` Release 发布的源码基线 |
-| 公开 `v1.8.6` DMG | SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` | GitHub Release 制品，仅支持 Apple Silicon |
-| 公开 `v1.8.6` 标签 | `v1.8.6` | 不可变的已发布源码基线；精确提交以标签解析结果为准 |
-| 私有 Forgejo 运行代码基线 | 标签 `v1.8.6` | 与公开已发布运行源码及私有标签一致 |
-| 已验证 Release DMG | SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` | `Local-Ops-1.8.6-arm64.dmg` 已通过校验和、ad-hoc 签名、arm64 架构、挂载布局、版本、内置工具和桌面端打包文件检查 |
+| 权威源码工作区 | `1.8.7` | PF 无端口自愈、非阻塞刷新和隧道降级状态均已交付并验证 |
+| 当前安装 App / 运行副本 | App 与内置后台 `1.8.7` | `/Applications/Local Ops.app` 与 `/Users/arvin/.local/share/local-ops/.bundle-manifest.json` |
+| 公开 GitHub 运行代码基线 | 标签 `v1.8.7` | `v1.8.7` Release 的不可变源码基线 |
+| 公开 `v1.8.7` DMG | SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` | GitHub Release 制品，仅支持 Apple Silicon |
+| 公开 `v1.8.7` 标签 | `v1.8.7` | 不可变的已发布源码基线；精确提交以标签解析结果为准 |
+| 私有 Forgejo 运行代码基线 | 标签 `v1.8.7` | 与公开已发布运行源码及私有标签一致 |
+| 已验证 Release DMG | SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` | `Local-Ops-1.8.7-arm64.dmg` 已通过校验和、ad-hoc 签名、arm64 架构、挂载布局、版本、内置工具和桌面端打包文件检查 |
 
-后续纯文档提交可能继续推进任一 `main`；不可变的 `v1.8.6` 标签仍是已发布运行代码基线。
+后续纯文档提交可能继续推进任一 `main`；不可变的 `v1.8.7` 标签仍是已发布运行代码基线。
 
-v1.8.6 正式包含刷新一致性修复和逐隧道连续失败监督器：原子 catalog/state 快照、普通/强制刷新串行化、旧快照保护、菜单栏健康去抖和统一 SSH 动作契约均已打包并安装。1.8.7 源码进一步加入有预算的事件驱动 PF 自愈，并把 SSH 转发存活与应用/域名入口未就绪拆成可停止的降级状态；当前还不是公开 Release 或安装基线。
+v1.8.7 正式包含不会周期性冻结按钮或整页闪烁的原子刷新、逐隧道连续失败监督器、有预算的事件驱动 PF 自愈，以及 SSH 转发存活与应用/域名入口未就绪的独立状态。安装后已验证 App、内置后台、运行 manifest、特权 Helper 配置和代表性回环入口。
 
 ### 已验证的冷启动与 SSH readiness 行为
 
@@ -113,9 +113,9 @@ v1.8.6 正式包含刷新一致性修复和逐隧道连续失败监督器：原�
 
 ### 尚未解决与后续事项
 
-- 当前替换内置后台会重启 Local Ops 控制面。v1.8.6 安装验收时，Process Compose Worker 下的 SSH 进程随之重启一次，记忆会话恢复，稳定隧道计数回到 0。在升级流程能够保留 Worker 前，应避开正在进行的数据传输。
+- 当前替换内置后台会重启 Local Ops 控制面。v1.8.7 安装验收时，Process Compose Worker 下的 SSH 进程随之重启一次，记忆会话恢复，稳定隧道计数回到 0。在升级流程能够保留 Worker 前，应避开正在进行的数据传输。
 - 当前只提供 Apple Silicon 包，使用 ad-hoc 签名，尚未公证。
 - 终态恢复期间每 30 秒会向配置的本地域名入口发送一次真实 HTTP 请求；频率已刻意降低，但并非零流量。
-- 安装后有两条语音服务隧道仍处于“连接中”：本地 TCP listener 已存在，但其应用 readiness 尚未通过。这属于上游应用就绪问题，不是重复 SSH listener 或监督器重试泄漏。
+- SSH 转发已建立但应用或完整域名 readiness 不可用时，界面显示“服务未就绪”或“入口未就绪”并保留停止操作。这属于上游应用就绪问题，不是重复 SSH listener 或监督器重试泄漏。
 
 强制回归流程见[发布与热修回归手册](RELEASE_REGRESSION.md)。

@@ -13,7 +13,7 @@ git rev-parse HEAD
 git remote -v
 git ls-remote forgejo refs/heads/main
 git ls-remote origin refs/heads/main
-git rev-parse 'v1.8.6^{}'
+git rev-parse 'v1.8.7^{}'
 ```
 
 Record these separately:

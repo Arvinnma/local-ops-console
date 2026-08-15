@@ -28,7 +28,7 @@ Local Ops combines an Electron desktop app, a browser console, Process Compose, 
 - Docker Desktop is optional and is required only for Docker controls
 - Terminal.app is built in; iTerm2 is optional
 
-Intel (`x64`) packages are not provided in v1.8.6.
+Intel (`x64`) packages are not provided in v1.8.7.
 
 ## What it manages
 
@@ -49,7 +49,7 @@ Intel (`x64`) packages are not provided in v1.8.6.
 
 ## Install
 
-1. Download `Local-Ops-1.8.6-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
+1. Download `Local-Ops-1.8.7-arm64.dmg` from the [latest release](https://github.com/Arvinnma/local-ops-console/releases/latest).
 2. Open the DMG and drag **Local Ops** to **Applications**.
 3. Launch **Local Ops** from Applications.
 
@@ -163,13 +163,13 @@ npm ci
 npm run dmg
 ```
 
-The distributable is written to `desktop/dist/Local-Ops-1.8.6-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
+The distributable is written to `desktop/dist/Local-Ops-1.8.7-arm64.dmg`. The bundle step copies the current Caddy and Process Compose binaries into the application package.
 
 Read [Development and Release Guide](docs/DEVELOPMENT.md) before changing packaging, native helpers, loopback bindings, or Electron security settings.
 
 ## Verification
 
-The v1.8.6 release gate covers syntax and unit tests, isolated atomic-refresh acceptance, dynamic Caddy/PF port synchronization, bilingual static-copy coverage, configuration round trips, API security checks, trusted menu-bar actions and stop confirmation, desired-state preservation, managed-child reconciliation, duplicate-port protection, process-tree cleanup, service lifecycle and logs, per-tunnel consecutive-failure reset, complete domain-entry checks, Caddy path routing, Docker state reads, encrypted-key Keychain integration, silent login-item startup, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, and mounted-DMG layout/signature checks.
+The v1.8.7 release gate covers syntax and unit tests, isolated atomic-refresh acceptance, background refreshes that do not freeze or flicker controls, distinct SSH/application/domain readiness states, dynamic Caddy/PF port synchronization, bounded event-driven PF recovery, bilingual static-copy coverage, configuration round trips, API security checks, trusted menu-bar actions and stop confirmation, desired-state preservation, managed-child reconciliation, duplicate-port protection, process-tree cleanup, service lifecycle and logs, per-tunnel consecutive-failure reset, complete domain-entry checks, Caddy path routing, Docker state reads, encrypted-key Keychain integration, silent login-item startup, repeated menu-bar window restoration, responsive browser QA, application signature and architecture, and mounted-DMG layout/signature checks.
 
 Maintainers must consult [Authoritative Project Status](docs/PROJECT_STATUS.md) before describing a fix as public: the public GitHub release and the privately verified runtime can intentionally be at different commits. The repeatable verification sequence is in [Release and Hotfix Regression Manual](docs/RELEASE_REGRESSION.md).
 

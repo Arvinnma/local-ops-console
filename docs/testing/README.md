@@ -65,9 +65,14 @@ LOCAL_OPS_KEYCHAIN_HELPER=/tmp/local-ops-keychain-test npm run test:keychain
 - DMG SHA-256：`726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40`；`hdiutil verify`、ad-hoc 签名、arm64 架构和挂载布局通过。
 - 覆盖安装后 App 与运行后台均为 `1.8.6`，关键源码 SHA 一致；安装会重启控制面和既有 SSH Worker，因此已在无活动 Restic/传输任务时执行并保存旧 App 回滚副本。
 
-## 2026-08-15 v1.8.7 源码门禁
+## 2026-08-15 v1.8.7 发布回归
 
 - PF 定向回归覆盖 Apple 主规则→显式 request→Local Ops 子 anchor 顺序、配置同步、外部端口 80 占用拒绝、单飞、冷却、持久预算和失败提示语义。
 - 托盘回归覆盖普通后台刷新期间继续使用最后成功快照，只有真正 stale/offline 时禁用写操作。
 - SSH 展示回归覆盖转发已建立但应用或域名入口未就绪时显示独立降级状态，并保留可用的停止操作。
-- 本节仅记录源码和隔离测试目标；DMG、安装版与真实 PF 运行验收结果必须在实际执行后补录，不能预先视为通过。
+- `npm run check`：通过；源码与桌面包版本均为 `1.8.7`。
+- `npm test`：155 项单元/回归测试全部通过。
+- `npm run test:refresh-isolated`：后台刷新不冻结写操作、旧快照保护和隔离状态行为通过。
+- DMG SHA-256：`f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2`；`hdiutil verify`、严格签名、arm64 架构、版本和挂载布局通过。
+- 覆盖安装后 App 与运行后台均为 `1.8.7`，关键隧道源码 SHA 一致。安装按既有行为重启一次控制面与 Process Compose Worker；8 个预期 SSH listener 唯一恢复，3 条期望停止的隧道未被误启动。
+- 1Panel、硬件监控、Forgejo 与控制台入口返回 `200`，Documents/Identity 入口返回预期 `401`；无端口 Helper 配置与动态 Caddy 端口同步，`console.localhost` 返回 `200`。
