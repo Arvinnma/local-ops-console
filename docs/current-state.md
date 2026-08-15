@@ -1,6 +1,6 @@
 # 当前状态
 
-> 状态：权威源码与当前安装版均为 1.8.7；公开 GitHub Release 正在完成不可变标签与制品登记
+> 状态：权威源码、当前安装版、双远端标签与公开 GitHub Release 均已完成 1.8.7 验证
 
 状态日期：2026-08-15
 
@@ -9,14 +9,14 @@
 | 项目 | 当前事实 |
 | --- | --- |
 | project_id | `local-ops-console` |
-| 软件源码版本 | `1.8.7`，功能修复已提交并同步两个 `main`；发布文档与不可变标签在本轮收尾 |
+| 软件源码版本 | `1.8.7`；不可变发布提交 `1755798169aad7455c03608b6f2593cb3ae71b58` |
 | 权威源码仓库 | `/Users/arvin/Documents/AI/codex/local-ops-console` |
 | 旧源码仓库 | `/Users/arvin/Documents/Codex/projects/local-ops/local-ops-console`，只读保留 |
 | 当前分支 | `main` |
 | 公开 GitHub `origin/main` | 与本地 `main` 同步；精确 SHA 以 `git ls-remote origin refs/heads/main` 为准 |
 | 私有 Forgejo `forgejo/main` | 与本地 `main` 同步；精确 SHA 以 `git ls-remote forgejo refs/heads/main` 为准 |
-| 公开 / 私有发布标签 | 本轮创建 `v1.8.7`，两个远端必须解析到同一发布提交 |
-| GitHub Release | `v1.8.7`，Apple Silicon DMG SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` |
+| 公开 / 私有发布标签 | `v1.8.7`，两个远端均解析到 `1755798169aad7455c03608b6f2593cb3ae71b58` |
+| GitHub Release | [`v1.8.7`](https://github.com/Arvinnma/local-ops-console/releases/tag/v1.8.7)，Apple Silicon DMG SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` |
 | 当前安装 App | `/Applications/Local Ops.app`，App 与安装后台均已核验为 `1.8.7` |
 | m-wiki | `/Users/arvin/Documents/AI/m-wiki/项目/local-ops-console/` 已注册并解析到权威源码路径 |
 | 项目文档 | README、`docs/`、源码和测试共同构成当前事实；m-wiki 仅链接这些项目文件 |

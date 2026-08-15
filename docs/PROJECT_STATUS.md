@@ -16,10 +16,10 @@ Source update date: **2026-08-15**
 | --- | --- | --- |
 | Source workspace | `1.8.7` | Portless PF recovery, non-blocking refresh, and degraded-tunnel presentation are delivered and verified |
 | Installed application / runtime | App and bundled backend `1.8.7` | `/Applications/Local Ops.app` and `/Users/arvin/.local/share/local-ops/.bundle-manifest.json` |
-| Public GitHub runtime baseline | Tag `v1.8.7` | Immutable source baseline for the `v1.8.7` release |
+| Public GitHub runtime baseline | Tag `v1.8.7` | Immutable source baseline `1755798169aad7455c03608b6f2593cb3ae71b58` for the `v1.8.7` release |
 | Public `v1.8.7` DMG | SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` | GitHub Release artifact, Apple Silicon only |
-| Public `v1.8.7` tag | `v1.8.7` | Immutable released source baseline; resolve the tag for the exact commit |
-| Private Forgejo runtime baseline | Tag `v1.8.7` | Matches the public released runtime source and private tag |
+| Public `v1.8.7` tag | `v1.8.7` | Resolves to `1755798169aad7455c03608b6f2593cb3ae71b58` |
+| Private Forgejo runtime baseline | Tag `v1.8.7` | Resolves to the same `1755798169aad7455c03608b6f2593cb3ae71b58` release commit |
 | Verified release DMG | SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` | `Local-Ops-1.8.7-arm64.dmg`; checksum, ad-hoc signature, arm64 architecture, mounted layout, version, bundled tools, and packaged desktop files verified |
 
 Documentation-only commits may advance either `main`; the immutable `v1.8.7` tag remains the released runtime baseline.
@@ -72,10 +72,10 @@ Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandat
 | --- | --- | --- |
 | 权威源码工作区 | `1.8.7` | PF 无端口自愈、非阻塞刷新和隧道降级状态均已交付并验证 |
 | 当前安装 App / 运行副本 | App 与内置后台 `1.8.7` | `/Applications/Local Ops.app` 与 `/Users/arvin/.local/share/local-ops/.bundle-manifest.json` |
-| 公开 GitHub 运行代码基线 | 标签 `v1.8.7` | `v1.8.7` Release 的不可变源码基线 |
+| 公开 GitHub 运行代码基线 | 标签 `v1.8.7` | `v1.8.7` Release 的不可变源码基线 `1755798169aad7455c03608b6f2593cb3ae71b58` |
 | 公开 `v1.8.7` DMG | SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` | GitHub Release 制品，仅支持 Apple Silicon |
-| 公开 `v1.8.7` 标签 | `v1.8.7` | 不可变的已发布源码基线；精确提交以标签解析结果为准 |
-| 私有 Forgejo 运行代码基线 | 标签 `v1.8.7` | 与公开已发布运行源码及私有标签一致 |
+| 公开 `v1.8.7` 标签 | `v1.8.7` | 解析到 `1755798169aad7455c03608b6f2593cb3ae71b58` |
+| 私有 Forgejo 运行代码基线 | 标签 `v1.8.7` | 解析到相同的发布提交 `1755798169aad7455c03608b6f2593cb3ae71b58` |
 | 已验证 Release DMG | SHA-256 `f1684f7f7c3884a00b6d814e74e57b9be543a27a6e2bd319c5193ca4edee0fa2` | `Local-Ops-1.8.7-arm64.dmg` 已通过校验和、ad-hoc 签名、arm64 架构、挂载布局、版本、内置工具和桌面端打包文件检查 |
 
 后续纯文档提交可能继续推进任一 `main`；不可变的 `v1.8.7` 标签仍是已发布运行代码基线。
