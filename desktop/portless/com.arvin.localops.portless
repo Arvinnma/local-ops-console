@@ -1,13 +1,126 @@
 #!/bin/sh
 set -eu
 
-if /usr/sbin/lsof -nP -iTCP:80 -sTCP:LISTEN 2>/dev/null | /usr/bin/grep -q LISTEN; then
-  echo "port 80 is already in use" >&2
+REQUEST_PATH=${1:-}
+PROXY_PORT=${2:-}
+LOCK_DIR=/var/run/com.arvin.localops.portless.lock
+LOCK_PID=${LOCK_DIR}/pid
+STATE_FILE=/var/db/com.arvin.localops.portless.state
+BUDGET_WINDOW=300
+MAX_ATTEMPTS=3
+BASE_COOLDOWN=15
+
+case "$REQUEST_PATH" in
+  /*) ;;
+  *) /bin/echo "invalid repair request path" >&2; exit 64 ;;
+esac
+case "$PROXY_PORT" in
+  ''|*[!0-9]*) /bin/echo "invalid proxy port" >&2; exit 64 ;;
+esac
+if [ "$PROXY_PORT" -lt 1024 ] || [ "$PROXY_PORT" -gt 65535 ]; then
+  /bin/echo "invalid proxy port" >&2
+  exit 64
+fi
+
+if [ ! -f "$REQUEST_PATH" ]; then
+  /bin/echo "no explicit PF repair request; skipping"
+  exit 0
+fi
+/bin/rm -f "$REQUEST_PATH"
+if ! /bin/mkdir "$LOCK_DIR" 2>/dev/null; then
+  holder=
+  if [ -f "$LOCK_PID" ]; then
+    IFS= read -r holder < "$LOCK_PID" || true
+  fi
+  case "$holder" in
+    ''|*[!0-9]*) holder= ;;
+  esac
+  if [ -n "$holder" ] \
+    && /bin/kill -0 "$holder" 2>/dev/null \
+    && /bin/ps -p "$holder" -o command= 2>/dev/null | /usr/bin/grep -q 'com.arvin.localops.portless'; then
+    /bin/echo "repair already in progress"
+    exit 0
+  fi
+  /bin/rm -f "$LOCK_PID"
+  if ! /bin/rmdir "$LOCK_DIR" 2>/dev/null || ! /bin/mkdir "$LOCK_DIR" 2>/dev/null; then
+    /bin/echo "repair lock is unavailable" >&2
+    exit 75
+  fi
+fi
+/bin/echo "$$" > "$LOCK_PID"
+trap '/bin/rm -f "$LOCK_PID"; /bin/rmdir "$LOCK_DIR" >/dev/null 2>&1 || true' EXIT HUP INT TERM
+
+probe_health() {
+  port=$1
+  if body=$(/usr/bin/curl --noproxy '*' --silent --show-error --connect-timeout 1 --max-time 2 \
+    -H 'Host: console.localhost' "http://127.0.0.1:${port}/api/health" 2>/dev/null); then
+    if /bin/echo "$body" | /usr/bin/grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
+      return 0
+    fi
+    return 2
+  fi
+  return 1
+}
+
+if ! probe_health "$PROXY_PORT"; then
+  /bin/echo "internal Caddy endpoint is unhealthy; skipping PF repair"
+  exit 0
+fi
+portless_probe=0
+probe_health 80 || portless_probe=$?
+if [ "$portless_probe" -eq 0 ]; then
+  /bin/rm -f "$STATE_FILE"
+  /bin/echo "portless endpoint is already healthy"
+  exit 0
+fi
+if [ "$portless_probe" -eq 2 ]; then
+  /bin/echo "port 80 is served by another endpoint; skipping PF repair" >&2
   exit 69
 fi
 
-if ! /sbin/pfctl -s info 2>/dev/null | /usr/bin/grep -q '^Status: Enabled'; then
-  /sbin/pfctl -e >/dev/null
+now=$(/bin/date +%s)
+window_start=$now
+last_attempt=0
+attempts=0
+if [ -f "$STATE_FILE" ]; then
+  IFS=, read -r window_start last_attempt attempts < "$STATE_FILE" || true
+fi
+case "$window_start,$last_attempt,$attempts" in
+  *[!0-9,]*) window_start=$now; last_attempt=0; attempts=0 ;;
+esac
+if [ $((now - window_start)) -ge "$BUDGET_WINDOW" ]; then
+  window_start=$now
+  last_attempt=0
+  attempts=0
+fi
+if [ "$attempts" -ge "$MAX_ATTEMPTS" ]; then
+  /bin/echo "PF repair budget exhausted (${attempts}/${MAX_ATTEMPTS})"
+  exit 75
+fi
+cooldown=$((attempts * BASE_COOLDOWN))
+if [ "$last_attempt" -gt 0 ] && [ $((now - last_attempt)) -lt "$cooldown" ]; then
+  /bin/echo "PF repair cooling down"
+  exit 75
 fi
 
+attempts=$((attempts + 1))
+temporary="${STATE_FILE}.$$"
+/bin/echo "${window_start},${now},${attempts}" > "$temporary"
+/usr/sbin/chown root:wheel "$temporary"
+/bin/chmod 600 "$temporary"
+/bin/mv -f "$temporary" "$STATE_FILE"
+
+if ! /sbin/pfctl -s info 2>/dev/null | /usr/bin/grep -q '^Status: Enabled'; then
+  /bin/echo "enabling PF after the Apple main rules were restored"
+  /sbin/pfctl -e >/dev/null
+fi
+/bin/echo "loading Local Ops PF anchor after Apple PF service (${attempts}/${MAX_ATTEMPTS})"
 /sbin/pfctl -a com.apple/local-ops -f /etc/pf.anchors/com.arvin.localops
+
+if probe_health 80; then
+  /bin/rm -f "$STATE_FILE"
+  /bin/echo "portless PF repair succeeded"
+  exit 0
+fi
+/bin/echo "portless PF repair did not restore health" >&2
+exit 75

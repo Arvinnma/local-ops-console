@@ -16,6 +16,7 @@ const {
 const { bringWindowToFront } = require("./window-lifecycle.cjs");
 const { confirmControlHealth } = require("./control-health.cjs");
 const { createRefreshCoordinator } = require("./refresh-coordinator.cjs");
+const { isTraySnapshotActionable } = require("./tray-refresh-policy.cjs");
 const {
   operationMatches,
   processIsActive,
@@ -25,8 +26,15 @@ const {
 const {
   conflictingRuntimePort,
   normalizeProxyPort,
-  renderPortlessAnchor
+  portlessConfigurationMatches,
+  renderPortlessAnchor,
+  renderPortlessDaemon
 } = require("./portless-config.cjs");
+const {
+  createPortlessRecoveryCoordinator,
+  createPortlessRepairTrigger,
+  portlessRecoveryFailureMessage
+} = require("./portless-recovery.cjs");
 
 const execFileAsync = promisify(execFile);
 const CONTROL_URL = "http://127.0.0.1:19090/";
@@ -41,6 +49,9 @@ const PORTLESS_DAEMON = `/Library/LaunchDaemons/${PORTLESS_LABEL}.plist`;
 const PORTLESS_HELPER = `/Library/PrivilegedHelperTools/${PORTLESS_LABEL}`;
 const PORTLESS_ANCHOR = "/etc/pf.anchors/com.arvin.localops";
 const PORTLESS_RENDERED_ANCHOR = path.join(INSTALL_DIR, "config", "portless.anchor");
+const PORTLESS_RENDERED_DAEMON = path.join(INSTALL_DIR, "config", "portless.plist");
+const PORTLESS_REQUEST_PATH = path.join(INSTALL_DIR, "runtime", "portless-repair.request");
+const PORTLESS_RECOVERY_STATE = path.join(INSTALL_DIR, "runtime", "portless-recovery-state.json");
 const PORTLESS_PROMPT_MARKER = path.join(INSTALL_DIR, "config", ".portless-prompted-v1");
 const LOG_DIR = path.join(os.homedir(), "Library", "Logs", "Local Ops");
 const LOG_FILE = path.join(LOG_DIR, "desktop.log");
@@ -71,6 +82,34 @@ let installPromise = null;
 let startupActionsApplied = false;
 let startupInitializationComplete = false;
 let startupPresentation = createStartupPresentation(false);
+
+const portlessRecovery = createPortlessRecoveryCoordinator({
+  probe: (port) => probePortlessEndpoint(port),
+  triggerRepair: createPortlessRepairTrigger({
+    requestPath: PORTLESS_REQUEST_PATH,
+    restoreMainRules: () => execFileAsync("/bin/launchctl", ["kickstart", "-k", "system/com.apple.pfctl"], {
+      timeout: 10000,
+      maxBuffer: 1024 * 1024
+    }),
+    writeRequest: (file, content) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      writeFileAtomic(file, content, 0o600);
+    }
+  }),
+  loadBudgetState: () => {
+    if (!fs.existsSync(PORTLESS_RECOVERY_STATE)) return {};
+    return JSON.parse(fs.readFileSync(PORTLESS_RECOVERY_STATE, "utf8"));
+  },
+  saveBudgetState: (state) => {
+    if (!state.attemptTimes?.length && !state.cooldownUntil) {
+      fs.rmSync(PORTLESS_RECOVERY_STATE, { force: true });
+      return;
+    }
+    fs.mkdirSync(path.dirname(PORTLESS_RECOVERY_STATE), { recursive: true });
+    writeFileAtomic(PORTLESS_RECOVERY_STATE, `${JSON.stringify(state, null, 2)}\n`, 0o600);
+  },
+  log
+});
 
 fs.mkdirSync(LOG_DIR, { recursive: true });
 app.setName("Local Ops");
@@ -483,7 +522,7 @@ function buildTrayMenu() {
   const routes = config.routes || [];
   const terminalTasks = config.terminalTasks || [];
   const runningServices = services.filter((item) => processById.get(item.id)?.status === "running").length;
-  const runningTunnels = tunnels.filter((item) => tunnelPresentationState(processById.get(item.id)) === "connected").length;
+  const runningTunnels = tunnels.filter((item) => ["connected", "service_unready", "entry_unready"].includes(tunnelPresentationState(processById.get(item.id)))).length;
   const containers = docker.containers || [];
   const runningContainers = containers.filter((item) => item.running).length;
 
@@ -626,6 +665,8 @@ function trayManagedResourceLabel(name, processState, kind, busy = false) {
   const displayState = tunnelPresentationState(processState);
   const status = ({
     connected: trayText("已连接 🟢", "Connected 🟢"),
+    service_unready: trayText("服务未就绪 🟡", "Service Not Ready 🟡"),
+    entry_unready: trayText("入口未就绪 🟡", "Entry Not Ready 🟡"),
     connecting: trayText("连接中 🟡", "Connecting 🟡"),
     connection_failed: trayText("连接失败 🔴", "Connection Failed 🔴"),
     stopped: trayText("已停止 🔴", "Stopped 🔴")
@@ -688,8 +729,13 @@ function buildTrayPanelState() {
   const routes = config.routes || [];
   const containers = docker.containers || [];
   const runningServices = services.filter((item) => processById.get(item.id)?.status === "running").length;
-  const runningTunnels = tunnels.filter((item) => tunnelPresentationState(processById.get(item.id)) === "connected").length;
+  const runningTunnels = tunnels.filter((item) => ["connected", "service_unready", "entry_unready"].includes(tunnelPresentationState(processById.get(item.id)))).length;
   const runningContainers = containers.filter((item) => item.running).length;
+  const snapshotActionable = isTraySnapshotActionable({
+    online: isOnline,
+    hasSnapshot: Boolean(traySnapshot),
+    snapshotState: traySnapshotState
+  });
 
   const managedItems = (definitions, kind) => definitions.map((definition) => {
     const actionKey = `process:${definition.id}`;
@@ -704,6 +750,8 @@ function buildTrayPanelState() {
       : kind === "tunnel"
           ? ({
             connected: t("已连接", "Connected"),
+            service_unready: t("服务未就绪", "Service Not Ready"),
+            entry_unready: t("入口未就绪", "Entry Not Ready"),
             connecting: t("连接中", "Connecting"),
             connection_failed: t("连接失败", "Connection Failed"),
             stopped: t("已停止", "Stopped")
@@ -715,8 +763,8 @@ function buildTrayPanelState() {
       running: connected,
       active,
       busy,
-      disabled: !isOnline || traySnapshotState !== "fresh" || Boolean(tunnelAction?.disabled),
-      tone: busy || tunnelState === "connecting" ? "busy" : connected ? "running" : "stopped",
+      disabled: !snapshotActionable || Boolean(tunnelAction?.disabled),
+      tone: busy || ["connecting", "service_unready", "entry_unready"].includes(tunnelState) ? "busy" : connected ? "running" : "stopped",
       status,
       displayState: tunnelState,
       operation: kind === "tunnel" ? tunnelAction.operation : active ? "stop" : "start",
@@ -746,7 +794,7 @@ function buildTrayPanelState() {
       name: docker.appInstalled ? "Docker Desktop" : t("Docker Desktop 未安装", "Docker Desktop Not Installed"),
       running: false,
       busy,
-      disabled: traySnapshotState !== "fresh" || !docker.appInstalled,
+      disabled: !snapshotActionable || !docker.appInstalled,
       status: busy ? t("启动中", "Starting") : t("已关闭", "Off"),
       action: docker.appInstalled ? { type: "docker-desktop" } : null
     }];
@@ -759,7 +807,7 @@ function buildTrayPanelState() {
         name: container.name || container.shortId,
         running: Boolean(container.running),
         busy,
-        disabled: traySnapshotState !== "fresh",
+        disabled: !snapshotActionable,
         status: busy ? t("处理中", "Working") : container.running ? t("已开启", "On") : t("已关闭", "Off"),
         action: { type: "docker", id: container.id }
       };
@@ -790,7 +838,7 @@ function buildTrayPanelState() {
           name: task.name || task.id,
           running: isOnline,
           busy,
-          disabled: !isOnline || traySnapshotState !== "fresh",
+          disabled: !snapshotActionable,
           status: busy ? t("执行中", "Running") : isOnline ? t("就绪", "Ready") : t("不可用", "Unavailable"),
           action: { type: "terminal", id: task.id }
         };
@@ -854,8 +902,6 @@ function pushTrayPanelState() {
 
 async function performTrayPanelAction(payload = {}) {
   const type = String(payload.type || "");
-  const config = traySnapshot?.bootstrap?.config || readJsonFile(CATALOG_PATH, {});
-  const processById = new Map((traySnapshot?.state?.processes || []).map((item) => [item.id, item]));
 
   if (type === "refresh") {
     await refreshTraySnapshot(true);
@@ -885,9 +931,18 @@ async function performTrayPanelAction(payload = {}) {
     }, 60);
     return {};
   }
-  if (["process", "terminal", "docker-desktop", "docker"].includes(type) && traySnapshotState !== "fresh") {
-    throw new Error(trayText("当前状态不是最新数据，请先刷新", "State is stale. Refresh first."));
+  if (["process", "terminal", "docker-desktop", "docker"].includes(type)) {
+    while (traySnapshotState === "refreshing") await refreshTraySnapshot(false);
+    if (!isTraySnapshotActionable({
+      online: isOnline,
+      hasSnapshot: Boolean(traySnapshot),
+      snapshotState: traySnapshotState
+    })) {
+      throw new Error(trayText("当前状态不是最新数据，请先刷新", "State is stale. Refresh first."));
+    }
   }
+  const config = traySnapshot?.bootstrap?.config || readJsonFile(CATALOG_PATH, {});
+  const processById = new Map((traySnapshot?.state?.processes || []).map((item) => [item.id, item]));
   if (type === "route") {
     const route = (config.routes || []).find((item) => item.id === String(payload.id || ""));
     if (!route || route.enabled === false || !isSafeExternalUrl(route.url)) throw new Error("该反向代理地址不可用");
@@ -1136,6 +1191,7 @@ async function connectControlPlane() {
     applyLoginItemPreference();
     await loadConsole();
     updateTray(true, { forceRefresh: true });
+    void runPortlessRecovery("startup").catch((error) => log(`portless startup recovery check failed: ${error.message}`));
     void applyAppStartupActionsOnce();
     if (startupPresentation.shouldShowWindow()) void maybeOfferPortlessAccess();
   } catch (error) {
@@ -1352,7 +1408,7 @@ async function getPortlessStatus() {
   const proxyPort = normalizeProxyPort(catalog.settings?.proxyPort || 19080);
   const publicProxyPort = Number(catalog.settings?.publicProxyPort || proxyPort);
   const installed = [PORTLESS_DAEMON, PORTLESS_HELPER, PORTLESS_ANCHOR].every((file) => fs.existsSync(file));
-  const synchronized = installed && installedPortlessAnchorMatches(proxyPort);
+  const synchronized = installed && installedPortlessConfigurationMatches(proxyPort);
   const active = synchronized && await checkPortlessHealth();
   return {
     available: process.platform === "darwin",
@@ -1385,28 +1441,38 @@ async function setPortlessAccess(enabled) {
     const catalog = readJsonFile(CATALOG_PATH, {});
     const proxyPort = normalizeProxyPort(catalog.settings?.proxyPort || 19080);
     const anchor = renderPortlessAnchor(fs.readFileSync(sources.anchor, "utf8"), proxyPort);
+    const daemon = renderPortlessDaemon(fs.readFileSync(sources.daemon, "utf8"), {
+      proxyPort,
+      requestPath: PORTLESS_REQUEST_PATH
+    });
     fs.mkdirSync(path.dirname(PORTLESS_RENDERED_ANCHOR), { recursive: true });
     writeFileAtomic(PORTLESS_RENDERED_ANCHOR, anchor, 0o600);
+    writeFileAtomic(PORTLESS_RENDERED_DAEMON, daemon, 0o600);
+    fs.mkdirSync(path.dirname(PORTLESS_REQUEST_PATH), { recursive: true });
+    fs.rmSync(PORTLESS_REQUEST_PATH, { force: true });
 
     const command = [
       "/usr/bin/install -d -o root -g wheel -m 755 /Library/PrivilegedHelperTools",
       `/usr/bin/install -o root -g wheel -m 755 ${shellQuote(sources.helper)} ${shellQuote(PORTLESS_HELPER)}`,
       `/usr/bin/install -o root -g wheel -m 644 ${shellQuote(PORTLESS_RENDERED_ANCHOR)} ${shellQuote(PORTLESS_ANCHOR)}`,
-      `/usr/bin/install -o root -g wheel -m 644 ${shellQuote(sources.daemon)} ${shellQuote(PORTLESS_DAEMON)}`,
+      `/usr/bin/install -o root -g wheel -m 644 ${shellQuote(PORTLESS_RENDERED_DAEMON)} ${shellQuote(PORTLESS_DAEMON)}`,
       `/bin/launchctl bootout system/${PORTLESS_LABEL} >/dev/null 2>&1 || true`,
-      shellQuote(PORTLESS_HELPER),
-      `/bin/launchctl bootstrap system ${shellQuote(PORTLESS_DAEMON)}`,
-      `/bin/launchctl kickstart -k system/${PORTLESS_LABEL}`
+      `/bin/launchctl bootstrap system ${shellQuote(PORTLESS_DAEMON)}`
     ].join("; ");
     await runElevatedShell(command);
     await updatePublicProxyPort(80);
+    const recovery = await runPortlessRecovery("enable");
+    const recoveryError = portlessRecoveryFailureMessage(recovery);
+    if (recoveryError) throw new Error(recoveryError);
   } else {
     const command = [
       `/bin/launchctl bootout system/${PORTLESS_LABEL} >/dev/null 2>&1 || true`,
       `/sbin/pfctl -a com.apple/local-ops -F all >/dev/null 2>&1 || true`,
-      `/bin/rm -f ${shellQuote(PORTLESS_DAEMON)} ${shellQuote(PORTLESS_HELPER)} ${shellQuote(PORTLESS_ANCHOR)}`
+      `/bin/rm -f ${shellQuote(PORTLESS_DAEMON)} ${shellQuote(PORTLESS_HELPER)} ${shellQuote(PORTLESS_ANCHOR)} /var/db/com.arvin.localops.portless.state`
     ].join("; ");
     await runElevatedShell(command);
+    fs.rmSync(PORTLESS_REQUEST_PATH, { force: true });
+    fs.rmSync(PORTLESS_RECOVERY_STATE, { force: true });
     const catalog = readJsonFile(CATALOG_PATH, {});
     await updatePublicProxyPort(Number(catalog.settings?.proxyPort || 19080));
   }
@@ -1448,13 +1514,24 @@ async function setProxyPort(value) {
   return { proxyPort, publicProxyPort: proxyPort };
 }
 
-function installedPortlessAnchorMatches(proxyPort) {
+function installedPortlessConfigurationMatches(proxyPort) {
   try {
     const resourceDir = app.isPackaged
       ? path.join(process.resourcesPath, "portless")
       : path.join(__dirname, "portless");
-    const template = fs.readFileSync(path.join(resourceDir, "com.arvin.localops.anchor"), "utf8");
-    return fs.readFileSync(PORTLESS_ANCHOR, "utf8") === renderPortlessAnchor(template, proxyPort);
+    const anchorTemplate = fs.readFileSync(path.join(resourceDir, "com.arvin.localops.anchor"), "utf8");
+    const daemonTemplate = fs.readFileSync(path.join(resourceDir, `${PORTLESS_LABEL}.plist`), "utf8");
+    const helperTemplate = fs.readFileSync(path.join(resourceDir, PORTLESS_LABEL), "utf8");
+    return portlessConfigurationMatches({
+      anchorTemplate,
+      daemonTemplate,
+      helperTemplate,
+      installedAnchor: fs.readFileSync(PORTLESS_ANCHOR, "utf8"),
+      installedDaemon: fs.readFileSync(PORTLESS_DAEMON, "utf8"),
+      installedHelper: fs.readFileSync(PORTLESS_HELPER, "utf8"),
+      proxyPort,
+      requestPath: PORTLESS_REQUEST_PATH
+    });
   } catch {
     return false;
   }
@@ -1519,11 +1596,18 @@ function controlRequestJson(requestPath, options = {}) {
   });
 }
 
-function checkPortlessHealth() {
+function probePortlessEndpoint(port) {
   return new Promise((resolve) => {
+    const started = Date.now();
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve({ latencyMs: Date.now() - started, ...result });
+    };
     const request = http.get({
       hostname: "127.0.0.1",
-      port: 80,
+      port,
       path: "/api/health",
       headers: { Host: "console.localhost" },
       timeout: 1200
@@ -1534,13 +1618,37 @@ function checkPortlessHealth() {
       response.on("end", () => {
         try {
           const payload = JSON.parse(body);
-          resolve(response.statusCode === 200 && payload.ok === true);
-        } catch { resolve(false); }
+          const ok = response.statusCode === 200 && payload.ok === true;
+          finish({ ok, repairable: ok, error: ok ? "" : `HTTP ${response.statusCode}` });
+        } catch { finish({ ok: false, repairable: false, error: "健康响应格式无效" }); }
       });
     });
-    request.on("timeout", () => { request.destroy(); resolve(false); });
-    request.on("error", () => resolve(false));
+    request.on("timeout", () => { request.destroy(); finish({ ok: false, repairable: true, error: "健康检查超时" }); });
+    request.on("error", (error) => finish({ ok: false, repairable: true, error: error.message }));
   });
+}
+
+async function checkPortlessHealth() {
+  return Boolean((await probePortlessEndpoint(80)).ok);
+}
+
+async function runPortlessRecovery(source) {
+  const catalog = readJsonFile(CATALOG_PATH, {});
+  const proxyPort = normalizeProxyPort(catalog.settings?.proxyPort || 19080);
+  const publicProxyPort = Number(catalog.settings?.publicProxyPort || proxyPort);
+  const installed = [PORTLESS_DAEMON, PORTLESS_HELPER, PORTLESS_ANCHOR].every((file) => fs.existsSync(file));
+  const result = await portlessRecovery.check({
+    source,
+    platform: process.platform,
+    configured: publicProxyPort === 80,
+    installed,
+    synchronized: installed && installedPortlessConfigurationMatches(proxyPort),
+    proxyPort
+  });
+  if (["recovered", "repair_failed", "repair_unverified", "budget_exhausted", "state_unavailable"].includes(result.status)) {
+    log(`portless recovery status=${result.status} source=${source} attempts=${result.attempts ?? 0} error=${result.error || result.portless?.error || ""}`);
+  }
+  return result;
 }
 
 async function runElevatedShell(command) {
@@ -1895,7 +2003,10 @@ function startHealthMonitor() {
       log(`health changed: ${online ? "online" : "offline"} latency=${health.latencyMs ?? "-"} error=${health.error || ""}`);
       if (online && mainWindow && mainWindow.webContents.getURL().startsWith("file:")) await loadConsole();
     }
-    if (online) void refreshTraySnapshot().catch((error) => log(`tray monitor refresh failed: ${error.message}`));
+    if (online) {
+      void refreshTraySnapshot().catch((error) => log(`tray monitor refresh failed: ${error.message}`));
+      void runPortlessRecovery("runtime").catch((error) => log(`portless recovery check failed: ${error.message}`));
+    }
   }, 10000);
 }
 

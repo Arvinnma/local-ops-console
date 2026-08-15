@@ -79,19 +79,19 @@ test("desktop refresh failure rejects while the owner can retain its last succes
   assert.deepEqual(states, ["refreshing", "fresh", "refreshing", "stale"]);
 });
 
-test("a domain-only terminal failure retries the entry without restarting SSH", () => {
+test("a domain-only terminal failure remains stoppable while SSH stays connected", () => {
   const result = resolveTunnelOperation({
     status: "connection_failed",
     active: true,
     healthCheck: { ok: true },
     domainEntry: { configured: true, ready: false, terminal: true }
   });
-  assert.deepEqual(result, { displayState: "connection_failed", operation: "domain-recheck", disabled: false });
+  assert.deepEqual(result, { displayState: "entry_unready", operation: "stop", disabled: false });
 });
 
-test("connecting tunnel actions stay disabled", () => {
+test("active connecting tunnels remain stoppable", () => {
   assert.deepEqual(resolveTunnelOperation({ status: "retrying", active: true }), {
-    displayState: "connecting", operation: "", disabled: true
+    displayState: "connecting", operation: "stop", disabled: false
   });
 });
 
@@ -109,4 +109,14 @@ test("control-plane recovery requests a forced tray refresh", async () => {
   assert.match(source, /refreshTraySnapshot\(forceRefresh\)/);
   assert.match(source, /scheduleReconnect[\s\S]*?updateTray\(true, \{ forceRefresh: true \}\)/);
   assert.match(source, /restartControlPlane[\s\S]*?updateTray\(true, \{ forceRefresh: true \}\)/);
+});
+
+test("tray actions wait for an in-flight background refresh instead of freezing", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../desktop/main.cjs", import.meta.url), "utf8");
+  const traySource = await readFile(new URL("../desktop/tray.js", import.meta.url), "utf8");
+  assert.match(source, /while \(traySnapshotState === "refreshing"\) await refreshTraySnapshot\(false\)/);
+  assert.doesNotMatch(source, /traySnapshotState !== "fresh" \|\| Boolean\(tunnelAction\?\.disabled\)/);
+  assert.doesNotMatch(traySource, /refreshButton\.disabled = Boolean\(state\.refreshing\)/);
+  assert.match(traySource, /previousState\.snapshotState === "fresh"[\s\S]*?state\.snapshotState === "refreshing"/);
 });

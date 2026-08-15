@@ -8,12 +8,18 @@ import {
   tunnelPrimaryAction
 } from "../public/tunnel-ui.js";
 
-test("tunnel presentation exposes only the four user-facing states", () => {
+test("tunnel presentation distinguishes connection, service readiness, and entry readiness", () => {
   assert.equal(tunnelDisplayState({ status: "stopped", active: false }), "stopped");
   assert.equal(tunnelDisplayState({ status: "waiting_network", active: true }), "connecting");
   assert.equal(tunnelDisplayState({ status: "retrying", active: true }), "connecting");
   assert.equal(tunnelDisplayState({ status: "connection_failed", active: false }), "connection_failed");
   assert.equal(tunnelDisplayState(connectedTunnel()), "connected");
+  assert.equal(tunnelDisplayState(connectedTunnel({
+    readinessCheck: { configured: true, ok: false }
+  })), "service_unready");
+  assert.equal(tunnelDisplayState(connectedTunnel({
+    domainEntry: { configured: true, ready: false }
+  })), "entry_unready");
 });
 
 test("a configured domain entry must be ready before the card reports connected", () => {
@@ -25,12 +31,12 @@ test("a configured domain entry must be ready before the card reports connected"
     },
     fullyAvailable: false
   });
-  assert.equal(tunnelDisplayState(process), "connecting");
-  assert.equal(tunnelFailureMessage(process), "");
+  assert.equal(tunnelDisplayState(process), "entry_unready");
+  assert.equal(tunnelFailureMessage(process), "ECONNREFUSED");
   assert.equal(isDomainOnlyFailure(process), true);
 });
 
-test("a domain entry becomes a final failure only after its retry budget is exhausted", () => {
+test("a domain-entry failure does not disguise a live SSH tunnel as a connection failure", () => {
   const process = connectedTunnel({
     status: "connection_failed",
     domainEntry: {
@@ -41,7 +47,7 @@ test("a domain entry becomes a final failure only after its retry budget is exha
     },
     fullyAvailable: false
   });
-  assert.equal(tunnelDisplayState(process), "connection_failed");
+  assert.equal(tunnelDisplayState(process), "entry_unready");
   assert.equal(tunnelFailureMessage(process), "ECONNREFUSED");
   assert.equal(isDomainOnlyFailure(process), true);
 });
@@ -62,8 +68,8 @@ test("HTTP application readiness can be degraded while the SSH tunnel stays conn
       error: "HTTP 503 Service Unavailable"
     }
   });
-  assert.equal(tunnelDisplayState(process), "connected");
-  assert.equal(tunnelFailureMessage(process), "");
+  assert.equal(tunnelDisplayState(process), "service_unready");
+  assert.equal(tunnelFailureMessage(process), "HTTP 503 Service Unavailable");
 });
 
 test("an active retry and a locally pending action remain connecting and clear errors", () => {
@@ -99,8 +105,8 @@ test("an SSH failure takes priority over a dependent domain-entry failure", () =
   assert.equal(tunnelFailureMessage(failed), "Permission denied (publickey)");
 });
 
-test("primary actions follow the four-state interaction contract", () => {
-  assert.deepEqual(tunnelPrimaryAction("connected"), {
+test("primary actions let every active tunnel stop even while connecting or unready", () => {
+  assert.deepEqual(tunnelPrimaryAction("connected", { active: true }), {
     action: "stop", style: "stop", label: "关闭", disabled: false
   });
   assert.deepEqual(tunnelPrimaryAction("stopped"), {
@@ -109,8 +115,20 @@ test("primary actions follow the four-state interaction contract", () => {
   assert.deepEqual(tunnelPrimaryAction("connection_failed"), {
     action: "retry-tunnel", style: "restart", label: "重试", disabled: false
   });
+  assert.deepEqual(tunnelPrimaryAction("connecting", { active: true }), {
+    action: "stop", style: "stop", label: "关闭", disabled: false
+  });
+  assert.deepEqual(tunnelPrimaryAction("service_unready", { active: true }), {
+    action: "stop", style: "stop", label: "关闭", disabled: false
+  });
+  assert.deepEqual(tunnelPrimaryAction("entry_unready", { active: true }), {
+    action: "stop", style: "stop", label: "关闭", disabled: false
+  });
   assert.deepEqual(tunnelPrimaryAction("connecting"), {
     action: "", style: "pending", label: "连接中", disabled: true
+  });
+  assert.deepEqual(tunnelPrimaryAction("connected", { active: true, busy: true }), {
+    action: "", style: "pending", label: "处理中", disabled: true
   });
 });
 

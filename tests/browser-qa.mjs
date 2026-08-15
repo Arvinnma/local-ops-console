@@ -101,7 +101,7 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 250));
     return [...document.querySelectorAll("#tunnel-cards .tunnel-card")].map((card) => {
       const state = [...card.querySelector(".tunnel-card-head .status-pill").classList]
-        .find((name) => ["connected", "connecting", "connection_failed", "stopped"].includes(name));
+        .find((name) => ["connected", "service_unready", "entry_unready", "connecting", "connection_failed", "stopped"].includes(name));
       const primary = card.querySelector(".tunnel-card-foot .row-actions > .mini-button:first-child");
       return {
         state,
@@ -117,16 +117,16 @@ try {
   for (const tunnel of tunnels) {
     assert.ok(tunnel.state, `Tunnel exposed an unsupported state: ${JSON.stringify(tunnel)}`);
     assert.equal(tunnel.diagnosticCount, 5, "Tunnel cards must expose health diagnostics plus the consecutive-failure counter");
-    assert.equal(tunnel.hasError, tunnel.state === "connection_failed", "Only final tunnel failures may display error text");
+    assert.equal(tunnel.hasError, ["service_unready", "entry_unready", "connection_failed"].includes(tunnel.state), "Only unavailable or failed tunnels may display error text");
     if (tunnel.state === "connecting") {
-      assert.equal(tunnel.primaryDisabled, true, "Connecting tunnel action must be disabled");
-      assert.ok(tunnel.primaryClasses.includes("action-pending"), "Connecting tunnel action must use the grey pending style");
+      assert.equal(tunnel.primaryAction, "stop", "An active connecting tunnel must remain stoppable");
+      assert.ok(tunnel.primaryClasses.includes("action-stop"), "Connecting tunnel stop must use the red style");
     }
     if (tunnel.state === "connection_failed") {
       assert.equal(tunnel.primaryAction, "retry-tunnel", "Failed tunnel must expose immediate retry");
       assert.ok(tunnel.primaryClasses.includes("action-restart"), "Failed tunnel retry must use the yellow style");
     }
-    if (tunnel.state === "connected") assert.equal(tunnel.primaryAction, "stop", "Connected tunnel must expose stop");
+    if (["connected", "service_unready", "entry_unready"].includes(tunnel.state)) assert.equal(tunnel.primaryAction, "stop", "Every active SSH tunnel must expose stop");
     if (tunnel.state === "stopped") assert.equal(tunnel.primaryAction, "start", "Stopped tunnel must expose start");
   }
 

@@ -1,13 +1,13 @@
-import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.8.6";
-import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.8.6";
+import { ICON_LIBRARY, ICON_BY_ID } from "./icon-library.js?v=1.8.7";
+import { getLocale, localizeDocument, normalizeLocale, setLocale, tr } from "./i18n.js?v=1.8.7";
 import {
   isDomainOnlyFailure,
   tunnelDisplayState,
   tunnelFailureMessage,
   tunnelPrimaryAction
-} from "./tunnel-ui.js?v=1.8.6";
-import { bootstrapConfigChanged } from "./resource-sync.js?v=1.8.6";
-import { createSnapshotRefreshCoordinator } from "./refresh-coordinator.js?v=1.8.6";
+} from "./tunnel-ui.js?v=1.8.7";
+import { bootstrapConfigChanged } from "./resource-sync.js?v=1.8.7";
+import { createSnapshotRefreshCoordinator } from "./refresh-coordinator.js?v=1.8.7";
 
 const LANGUAGE_STORAGE_KEY = "local-ops-language";
 setLocale(normalizeLocale(localStorage.getItem(LANGUAGE_STORAGE_KEY)));
@@ -33,6 +33,7 @@ const ui = {
   tunnelBusy: new Set(),
   polling: null,
   snapshotState: "empty",
+  refreshForce: false,
   lastSuccessfulAt: null,
   lastRefreshError: "",
   busy: false,
@@ -95,8 +96,9 @@ const snapshotRefresh = createSnapshotRefreshCoordinator({
     `/api/snapshot?fresh=${force ? 1 : 0}&docker=${includeDocker ? 1 : 0}`
   ),
   apply: applySnapshot,
-  onStateChange: ({ state, error }) => {
+  onStateChange: ({ state, error, force = false }) => {
     ui.snapshotState = state;
+    ui.refreshForce = state === "refreshing" && force;
     ui.lastRefreshError = state === "stale" ? String(error?.message || tr("刷新失败")) : "";
     if (state === "fresh") ui.lastSuccessfulAt = new Date().toISOString();
     updateRefreshPresentation();
@@ -170,7 +172,7 @@ function bindEvents() {
     if (action) {
       event.preventDefault();
       closeActionMenu(false);
-      if (ui.snapshotState !== "fresh" && action.dataset.action !== "logs") {
+      if (!hasActionableSnapshot() && action.dataset.action !== "logs") {
         toast(tr("当前状态不是最新数据，请先刷新"), "error");
         return;
       }
@@ -300,14 +302,18 @@ function applySnapshot(snapshot) {
   if (docker) renderDocker();
 }
 
+function hasActionableSnapshot() {
+  return Boolean(ui.state && (ui.snapshotState === "fresh" || ui.snapshotState === "refreshing"));
+}
+
 function updateRefreshPresentation() {
   document.documentElement.dataset.snapshotState = ui.snapshotState;
   const button = document.querySelector("#refresh-button");
-  if (button) button.disabled = ui.snapshotState === "refreshing";
+  if (button) button.disabled = ui.refreshForce;
   if (!ui.state) return;
   const label = document.querySelector("#last-sync");
   if (!label) return;
-  if (ui.snapshotState === "refreshing") {
+  if (ui.refreshForce) {
     label.textContent = tr("正在刷新…");
     label.title = "";
   } else if (ui.snapshotState === "stale") {
@@ -315,13 +321,67 @@ function updateRefreshPresentation() {
       ? tr("刷新失败，显示 {time} 状态", { time: formatTime(ui.lastSuccessfulAt) })
       : tr("刷新失败，显示上次状态");
     label.title = ui.lastRefreshError;
+    renderServicesTable();
+    renderTunnelCards();
+    renderRoutesTable();
+    renderTerminalTable();
+    if (ui.docker) renderDocker();
+    updateBulkStartButton();
   } else label.title = "";
-  renderServicesTable();
-  renderTunnelCards();
-  renderRoutesTable();
-  renderTerminalTable();
-  if (ui.docker) renderDocker();
-  updateBulkStartButton();
+}
+
+function updateStableMarkup(container, markup) {
+  if (!container || container.innerHTML === markup) return;
+  if (ui.dragging && container.contains(ui.dragging.item)) return;
+  const range = document.createRange();
+  range.selectNodeContents(container);
+  const next = range.createContextualFragment(markup);
+  patchChildNodes(container, next);
+}
+
+function patchChildNodes(currentParent, nextParent) {
+  let current = currentParent.firstChild;
+  let next = nextParent.firstChild;
+  while (next) {
+    const nextSibling = next.nextSibling;
+    if (!current) {
+      currentParent.append(next.cloneNode(true));
+    } else if (sameNodeShape(current, next)) {
+      const currentSibling = current.nextSibling;
+      patchNode(current, next);
+      current = currentSibling;
+    } else {
+      const replacement = next.cloneNode(true);
+      current.replaceWith(replacement);
+      current = replacement.nextSibling;
+    }
+    next = nextSibling;
+  }
+  while (current) {
+    const sibling = current.nextSibling;
+    current.remove();
+    current = sibling;
+  }
+}
+
+function sameNodeShape(current, next) {
+  return current.nodeType === next.nodeType
+    && (current.nodeType !== Node.ELEMENT_NODE || current.nodeName === next.nodeName);
+}
+
+function patchNode(current, next) {
+  if (current.nodeType === Node.TEXT_NODE || current.nodeType === Node.COMMENT_NODE) {
+    if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+    return;
+  }
+  const nextAttributes = new Map([...next.attributes].map((attribute) => [attribute.name, attribute.value]));
+  [...current.attributes].forEach((attribute) => {
+    if (!nextAttributes.has(attribute.name)) current.removeAttribute(attribute.name);
+  });
+  nextAttributes.forEach((value, name) => {
+    if (current.getAttribute(name) !== value) current.setAttribute(name, value);
+  });
+  patchChildNodes(current, next);
 }
 
 function renderState() {
@@ -406,7 +466,7 @@ function openAttentionDialog() {
 function renderAttentionDialog() {
   const list = document.querySelector("#attention-list");
   const items = attentionItems();
-  list.innerHTML = items.length ? items.map((item) => `
+  updateStableMarkup(list, items.length ? items.map((item) => `
     <article class="attention-item">
       <div class="attention-identity">
         ${resourceIcon(item.icon, item.fallbackIcon)}
@@ -415,7 +475,7 @@ function renderAttentionDialog() {
       <span class="status-pill ${escapeHtml(item.status)}">${statusLabel(item.status)}</span>
       <button type="button" class="text-button" data-attention-jump="${escapeAttribute(item.view)}">${tr("前往查看")}</button>
     </article>
-  `).join("") : `<p class="attention-empty">${tr("当前没有需要关注的项目。")}</p>`;
+  `).join("") : `<p class="attention-empty">${tr("当前没有需要关注的项目。")}</p>`);
   localizeDocument(list);
 }
 
@@ -439,7 +499,7 @@ function updateBulkStartButton() {
   button.dataset.scope = mode.scope;
   const candidates = bulkStartCandidates(mode.scope);
   const waiting = mode.scope === "docker" ? !ui.docker : !ui.state;
-  button.disabled = ui.snapshotState !== "fresh" || ui.busy || waiting || candidates.length === 0;
+  button.disabled = !hasActionableSnapshot() || ui.busy || waiting || candidates.length === 0;
   button.title = waiting
     ? tr("等待运行状态")
     : candidates.length
@@ -517,7 +577,7 @@ function renderOverviewProcesses() {
     ...ui.state.processes.filter((item) => !orderedIds.includes(item.id)),
     ...orderedIds.map((id) => byId.get(id)).filter(Boolean)
   ].slice(0, 5);
-  container.innerHTML = processes.length ? processes.map((item) => `
+  updateStableMarkup(container, processes.length ? processes.map((item) => `
     <article class="resource-row">
       <div class="resource-identity">
         ${resourceIcon(item.icon, item.kind === "system" ? "server" : "nodejs")}
@@ -527,7 +587,7 @@ function renderOverviewProcesses() {
       <span class="resource-meta">${item.pid ? `PID ${escapeHtml(item.pid)}` : "—"}</span>
       ${processControls(item, {}, "compact-actions")}
     </article>
-  `).join("") : '<p class="empty-card">没有托管进程。</p>';
+  `).join("") : '<p class="empty-card">没有托管进程。</p>');
 }
 
 function renderQuickRoutes() {
@@ -537,18 +597,18 @@ function renderQuickRoutes() {
     .map((item) => ({ ...item, ...(stateById.get(item.id) || {}) }))
     .filter((item) => item.enabled)
     .slice(0, 6);
-  container.innerHTML = routes.length ? routes.map((route) => `
+  updateStableMarkup(container, routes.length ? routes.map((route) => `
     <a class="route-link" href="${escapeAttribute(route.url)}" target="_blank" rel="noreferrer">
       ${resourceIcon(route.icon, "link", "route-favicon")}
       <span><strong>${escapeHtml(route.name)}</strong><small>${escapeHtml(route.url.replace("http://", ""))}</small></span>
       <span aria-hidden="true">↗</span>
     </a>
-  `).join("") : '<p class="empty-card">还没有配置域名。</p>';
+  `).join("") : '<p class="empty-card">还没有配置域名。</p>');
 }
 
 function renderExternalTable() {
   const body = document.querySelector("#external-table");
-  body.innerHTML = ui.state.external.length ? ui.state.external.map((item) => {
+  updateStableMarkup(body, ui.state.external.length ? ui.state.external.map((item) => {
     const route = ui.state.routes.find((candidate) => candidate.target === item.target && candidate.enabled);
     return `<tr>
       <td><div class="table-name">${resourceIcon(route?.icon, "server")}<span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.description || item.id)}</small></span></div></td>
@@ -559,7 +619,7 @@ function renderExternalTable() {
         ? actionControls(actionLink(route.url, tr("打开"), item.name), [], item.name)
         : actionControls(disabledActionButton("open", tr("没有可用入口"), item.name), [], item.name)}</td>
     </tr>`;
-  }).join("") : '<tr><td colspan="5" class="empty-cell">没有外部服务。</td></tr>';
+  }).join("") : '<tr><td colspan="5" class="empty-cell">没有外部服务。</td></tr>');
 }
 
 function renderServicesTable() {
@@ -571,7 +631,7 @@ function renderServicesTable() {
     ...source.filter((item) => !userIds.includes(item.id)),
     ...userIds.map((id) => byId.get(id)).filter(Boolean)
   ];
-  body.innerHTML = processes.length ? processes.map((item) => {
+  updateStableMarkup(body, processes.length ? processes.map((item) => {
     const index = userIds.indexOf(item.id);
     const editable = index >= 0;
     const displayStatus = item.status === "running" && item.health === "degraded" ? "degraded" : item.status;
@@ -584,14 +644,14 @@ function renderServicesTable() {
       <td class="action-cell">${processControls(item, editable ? { editAction: "edit-service", deleteAction: "delete-service" } : {})}</td>
       <td class="sort-cell">${sortHandle("service", item.id, !editable)}</td>
     </tr>`;
-  }).join("") : '<tr><td colspan="7" class="empty-cell">没有服务进程。</td></tr>';
+  }).join("") : '<tr><td colspan="7" class="empty-cell">没有服务进程。</td></tr>');
 }
 
 function renderTunnelCards() {
   const container = document.querySelector("#tunnel-cards");
   const tunnels = ui.bootstrap.config.tunnels;
   const processMap = new Map(ui.state.processes.map((item) => [item.id, item]));
-  container.innerHTML = tunnels.length ? tunnels.map((tunnel) => {
+  updateStableMarkup(container, tunnels.length ? tunnels.map((tunnel) => {
     const process = processMap.get(tunnel.id) || { id: tunnel.id, name: tunnel.name, status: "unknown", protected: false };
     const displayState = tunnelDisplayState(process, ui.tunnelBusy.has(tunnel.id));
     const failureMessage = tunnelFailureMessage(process, displayState);
@@ -612,7 +672,7 @@ function renderTunnelCards() {
         ${tunnelControls(process, displayState, { editAction: "edit-tunnel", deleteAction: "delete-tunnel" })}${sortHandle("tunnel", tunnel.id)}
       </div>
     </article>`;
-  }).join("") : '<p class="empty-card">还没有添加 SSH 隧道。点击右上角开始添加。</p>';
+  }).join("") : '<p class="empty-card">还没有添加 SSH 隧道。点击右上角开始添加。</p>');
   window.requestAnimationFrame(updateTunnelErrorMarquees);
 }
 
@@ -681,7 +741,7 @@ function renderRoutesTable() {
   const userIds = userRoutes.map((item) => item.id);
   const stateById = new Map(ui.state.routes.map((item) => [item.id, item]));
   const routes = configuredRoutes.map((item) => ({ ...item, ...(stateById.get(item.id) || {}) }));
-  body.innerHTML = routes.length ? routes.map((route) => {
+  updateStableMarkup(body, routes.length ? routes.map((route) => {
     const index = userIds.indexOf(route.id);
     const editable = index >= 0;
     return `<tr ${editable ? sortItemAttributes("route", route.id) : ""}>
@@ -692,25 +752,25 @@ function renderRoutesTable() {
       <td class="action-cell">${routeControls(route, editable)}</td>
       <td class="sort-cell">${sortHandle("route", route.id, !editable)}</td>
     </tr>`;
-  }).join("") : '<tr><td colspan="6" class="empty-cell">还没有配置本地域名。</td></tr>';
+  }).join("") : '<tr><td colspan="6" class="empty-cell">还没有配置本地域名。</td></tr>');
 }
 
 function renderTerminalTable() {
   if (!ui.bootstrap) return;
   const body = document.querySelector("#terminal-table");
   const tasks = ui.bootstrap.config.terminalTasks || [];
-  body.innerHTML = tasks.length ? tasks.map((task) => `<tr ${sortItemAttributes("terminal", task.id)}>
+  updateStableMarkup(body, tasks.length ? tasks.map((task) => `<tr ${sortItemAttributes("terminal", task.id)}>
     <td><div class="table-name">${resourceIcon(task.icon, "terminal")}<span><strong>${escapeHtml(task.name)}</strong><small>${escapeHtml(task.description || task.id)}</small></span></div></td>
     <td><span class="type-badge">${task.kind === "ssh" ? "SSH" : "命令"}</span></td>
     <td>${task.terminalApp === "iterm2" ? "iTerm2" : "系统终端"}</td>
     <td class="mono terminal-summary">${escapeHtml(terminalTaskSummary(task))}</td>
     <td class="action-cell">${actionControls(
-      actionButton("run-terminal", task.id, tr("执行"), task.name, { disabled: ui.snapshotState !== "fresh" }),
+      actionButton("run-terminal", task.id, tr("执行"), task.name, { disabled: !hasActionableSnapshot() }),
       [menuAction("edit-terminal", task.id, tr("编辑"), task.name), menuAction("delete-terminal", task.id, tr("删除"), task.name)],
       task.name
     )}</td>
     <td class="sort-cell">${sortHandle("terminal", task.id)}</td>
-  </tr>`).join("") : '<tr><td colspan="6" class="empty-cell">还没有终端操作。点击右上角开始添加。</td></tr>';
+  </tr>`).join("") : '<tr><td colspan="6" class="empty-cell">还没有终端操作。点击右上角开始添加。</td></tr>');
 }
 
 function terminalTaskSummary(task) {
@@ -739,37 +799,37 @@ function renderDocker() {
   if (!docker) return;
 
   if (!docker.available) {
-    runtime.innerHTML = '<span class="status-pill stopped">未安装</span>';
+    updateStableMarkup(runtime, '<span class="status-pill stopped">未安装</span>');
     notice.hidden = false;
     title.textContent = "没有找到 Docker CLI";
     copy.textContent = "请先安装 Docker Desktop，再重新打开 Local Ops。";
     desktopButton.hidden = true;
-    body.innerHTML = '<tr><td colspan="6" class="empty-cell">Docker 尚未安装。</td></tr>';
+    updateStableMarkup(body, '<tr><td colspan="6" class="empty-cell">Docker 尚未安装。</td></tr>');
     localizeDocument(document.querySelector('[data-page="docker"]'));
     return;
   }
   if (!docker.daemonOnline) {
-    runtime.innerHTML = '<span class="status-pill stopped">Engine 未运行</span>';
+    updateStableMarkup(runtime, '<span class="status-pill stopped">Engine 未运行</span>');
     notice.hidden = false;
     title.textContent = "Docker Engine 尚未运行";
     copy.textContent = /cannot connect to the docker daemon/i.test(docker.error || "")
       ? "启动 Docker Desktop，等待 Engine 就绪后即可管理本机容器。"
       : docker.error || "启动 Docker Desktop 后即可管理本机容器。";
     desktopButton.hidden = !docker.appInstalled;
-    body.innerHTML = '<tr><td colspan="6" class="empty-cell">等待 Docker Engine 启动。</td></tr>';
+    updateStableMarkup(body, '<tr><td colspan="6" class="empty-cell">等待 Docker Engine 启动。</td></tr>');
     localizeDocument(document.querySelector('[data-page="docker"]'));
     return;
   }
   notice.hidden = true;
-  runtime.innerHTML = `<span class="status-pill online">Engine ${escapeHtml(docker.serverVersion || "在线")}</span><span class="muted-label">${docker.containers.length} 个容器</span>`;
-  body.innerHTML = docker.containers.length ? docker.containers.map((item) => `<tr>
+  updateStableMarkup(runtime, `<span class="status-pill online">Engine ${escapeHtml(docker.serverVersion || "在线")}</span><span class="muted-label">${docker.containers.length} 个容器</span>`);
+  updateStableMarkup(body, docker.containers.length ? docker.containers.map((item) => `<tr>
     <td><div class="table-name">${resourceIcon("docker", "docker")}<span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.shortId)}</small></span></div></td>
     <td class="mono docker-image">${escapeHtml(item.image)}</td>
     <td><span class="status-pill ${item.running ? "running" : "stopped"}">${dockerStateLabel(item.state)}</span><small class="docker-status-copy">${escapeHtml(item.status)}</small></td>
     <td class="mono docker-ports">${escapeHtml(item.ports || "—")}</td>
     <td>${escapeHtml(item.composeProject || "—")}${item.composeService ? `<small class="docker-status-copy">${escapeHtml(item.composeService)}</small>` : ""}</td>
     <td class="action-cell">${dockerControls(item)}</td>
-  </tr>`).join("") : '<tr><td colspan="6" class="empty-cell">Docker Engine 在线，但还没有容器。</td></tr>';
+  </tr>`).join("") : '<tr><td colspan="6" class="empty-cell">Docker Engine 在线，但还没有容器。</td></tr>');
   localizeDocument(document.querySelector('[data-page="docker"]'));
 }
 
@@ -778,7 +838,7 @@ function dockerStateLabel(state) {
 }
 
 async function startDockerDesktop() {
-  if (ui.snapshotState !== "fresh") {
+  if (!hasActionableSnapshot()) {
     toast(tr("当前状态不是最新数据，请先刷新"), "error");
     return;
   }
@@ -1109,7 +1169,7 @@ function processControls(item, resourceActions = {}, extraClass = "") {
   menuItems.push(menuAction("logs", item.id, tr("查看日志"), resourceName));
   if (resourceActions.deleteAction) menuItems.push(menuAction(resourceActions.deleteAction, item.id, tr("删除"), resourceName));
 
-  const stale = ui.snapshotState !== "fresh";
+  const stale = !hasActionableSnapshot();
   const primary = item.protected
     ? ""
     : active
@@ -1122,12 +1182,15 @@ function tunnelControls(item, displayState, resourceActions = {}) {
   const resourceName = item.name || item.id;
   const menuItems = [];
   if (resourceActions.editAction) menuItems.push(menuAction(resourceActions.editAction, item.id, tr("编辑"), resourceName));
-  if (displayState === "connected") menuItems.push(menuAction("restart", item.id, tr("重启"), resourceName));
+  if (isProcessActive(item)) menuItems.push(menuAction("restart", item.id, tr("重启"), resourceName));
   menuItems.push(menuAction("logs", item.id, tr("查看日志"), resourceName));
   if (resourceActions.deleteAction) menuItems.push(menuAction(resourceActions.deleteAction, item.id, tr("删除"), resourceName));
 
-  const primaryAction = tunnelPrimaryAction(displayState);
-  const primary = primaryAction.disabled || ui.snapshotState !== "fresh"
+  const primaryAction = tunnelPrimaryAction(displayState, {
+    active: isProcessActive(item),
+    busy: ui.tunnelBusy.has(item.id)
+  });
+  const primary = primaryAction.disabled || !hasActionableSnapshot()
     ? disabledActionButton(primaryAction.style, tr(primaryAction.label), resourceName)
     : actionButton(primaryAction.action, item.id, tr(primaryAction.label), resourceName, { style: primaryAction.style });
   return actionControls(primary, menuItems, resourceName);
@@ -1141,7 +1204,7 @@ function routeControls(route, editable) {
 }
 
 function dockerControls(item) {
-  const stale = ui.snapshotState !== "fresh";
+  const stale = !hasActionableSnapshot();
   const primary = item.running
     ? actionButton("docker-stop", item.id, tr("关闭"), item.name, { disabled: stale })
     : actionButton("docker-start", item.id, tr("开启"), item.name, { disabled: stale });
@@ -1163,7 +1226,7 @@ function menuAction(action, id, label, resourceName = "") {
     label,
     resourceName,
     style: actionStyle(action),
-    disabled: ui.snapshotState !== "fresh" && action !== "logs"
+    disabled: !hasActionableSnapshot() && action !== "logs"
   };
 }
 
@@ -1527,7 +1590,7 @@ function updateTerminalSections() {
 
 async function saveResource(event) {
   event.preventDefault();
-  if (ui.editing && ui.snapshotState !== "fresh") {
+  if (ui.editing && !hasActionableSnapshot()) {
     toast(tr("当前状态不是最新数据，请先刷新"), "error");
     return;
   }
@@ -1709,7 +1772,7 @@ function sortItemAttributes(kind, id) {
 }
 
 function sortHandle(kind, id, disabled = false) {
-  if (disabled || ui.snapshotState !== "fresh") {
+  if (disabled || !hasActionableSnapshot()) {
     const label = disabled ? tr("系统固定资源不可排序") : tr("状态不是最新数据，暂不可排序");
     return `<span class="sort-handle is-disabled" aria-disabled="true" title="${escapeAttribute(label)}" aria-label="${escapeAttribute(label)}">${actionIcon("drag")}</span>`;
   }
@@ -1766,7 +1829,7 @@ function renderSortedKind(kind) {
 function handleSortDragStart(event) {
   const handle = event.target.closest("[data-sort-drag]");
   if (!handle) return;
-  if (ui.snapshotState !== "fresh") {
+  if (!hasActionableSnapshot()) {
     event.preventDefault();
     toast(tr("当前状态不是最新数据，请先刷新"), "error");
     return;
@@ -1906,6 +1969,8 @@ function statusLabel(status) {
   return tr(({
     running: "运行中",
     connected: "已连接",
+    service_unready: "服务未就绪",
+    entry_unready: "入口未就绪",
     connection_failed: "连接失败",
     waiting_network: "等待网络",
     connecting: "连接中",
@@ -1929,6 +1994,7 @@ function isProcessHealthy(item) {
   if (item.kind === "tunnel") {
     return item.status === "connected"
       && item.healthCheck?.ok
+      && (!item.readinessCheck?.configured || item.readinessCheck?.ok)
       && (!item.domainEntry?.configured || item.fullyAvailable);
   }
   return item.status === "running" && !["unhealthy", "degraded"].includes(item.health);

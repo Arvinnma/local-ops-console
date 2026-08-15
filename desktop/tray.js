@@ -39,6 +39,13 @@ function bindStaticActions() {
 }
 
 function render(state) {
+  const previousState = latestState;
+  const retainResourceRows = Boolean(
+    previousState
+    && previousState.snapshotState === "fresh"
+    && state.snapshotState === "refreshing"
+    && previousState.lastSuccessfulAt === state.lastSuccessfulAt
+  );
   latestState = state;
   document.documentElement.lang = state.language === "en-US" ? "en" : "zh-CN";
   const english = state.language === "en-US";
@@ -56,9 +63,9 @@ function render(state) {
   quitAppButton.textContent = state.labels.quitApp;
   offlineTitle.textContent = state.labels.offlineTitle;
   offlineDetail.textContent = state.labels.offlineDetail;
-  refreshButton.disabled = Boolean(state.refreshing);
-
-  sectionsRoot.replaceChildren(...state.sections.map((section) => renderSection(section, english)));
+  if (!retainResourceRows) {
+    sectionsRoot.replaceChildren(...state.sections.map((section) => renderSection(section, english)));
+  }
   scheduleOverflowRefresh();
 }
 

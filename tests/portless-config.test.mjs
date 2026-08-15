@@ -7,7 +7,9 @@ const require = createRequire(import.meta.url);
 const {
   conflictingRuntimePort,
   normalizeProxyPort,
-  renderPortlessAnchor
+  portlessConfigurationMatches,
+  renderPortlessAnchor,
+  renderPortlessDaemon
 } = require("../desktop/portless-config.cjs");
 
 const template = [
@@ -33,6 +35,42 @@ test("rejects privileged, fractional, and out-of-range Caddy ports", () => {
 
 test("rejects a portless template that cannot follow the runtime port", () => {
   assert.throws(() => renderPortlessAnchor("port 19080\n", 19079), /缺少端口占位符/);
+});
+
+test("renders the privileged daemon with a user-writable request path and configured proxy port", () => {
+  const daemonTemplate = fs.readFileSync(new URL("../desktop/portless/com.arvin.localops.portless.plist", import.meta.url), "utf8");
+  const daemon = renderPortlessDaemon(daemonTemplate, {
+    proxyPort: 19079,
+    requestPath: "/Users/test & user/.local/share/local-ops/runtime/portless-repair.request"
+  });
+  assert.match(daemon, /<key>WatchPaths<\/key>/);
+  assert.match(daemon, /<string>19079<\/string>/);
+  assert.match(daemon, /\/Users\/test &amp; user\/\.local\/share\/local-ops\/runtime\/portless-repair\.request/);
+  assert.doesNotMatch(daemon, /\{\{(?:PROXY_PORT|REQUEST_PATH)\}\}/);
+});
+
+test("requires the installed helper, daemon, and anchor to match the bundled portless components", () => {
+  const daemonTemplate = fs.readFileSync(new URL("../desktop/portless/com.arvin.localops.portless.plist", import.meta.url), "utf8");
+  const helperTemplate = fs.readFileSync(new URL("../desktop/portless/com.arvin.localops.portless", import.meta.url), "utf8");
+  const anchorTemplate = fs.readFileSync(new URL("../desktop/portless/com.arvin.localops.anchor", import.meta.url), "utf8");
+  const requestPath = "/Users/test/.local/share/local-ops/runtime/portless-repair.request";
+  const installedAnchor = renderPortlessAnchor(anchorTemplate, 19080);
+  const installedDaemon = renderPortlessDaemon(daemonTemplate, { proxyPort: 19080, requestPath });
+  const input = {
+    anchorTemplate,
+    daemonTemplate,
+    helperTemplate,
+    installedAnchor,
+    installedDaemon,
+    installedHelper: helperTemplate,
+    proxyPort: 19080,
+    requestPath
+  };
+
+  assert.equal(portlessConfigurationMatches(input), true);
+  assert.equal(portlessConfigurationMatches({ ...input, installedHelper: `${helperTemplate}\n# stale` }), false);
+  assert.equal(portlessConfigurationMatches({ ...input, installedDaemon: `${installedDaemon}\n<!-- stale -->` }), false);
+  assert.equal(portlessConfigurationMatches({ ...input, installedAnchor: `${installedAnchor}\n# stale` }), false);
 });
 
 test("detects collisions with the other Local Ops runtime ports", () => {

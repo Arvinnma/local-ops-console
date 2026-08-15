@@ -83,6 +83,10 @@ try {
   assert.equal(initial.service, true, "initial service snapshot was not rendered");
   assert.equal(initial.tunnel, true, "initial tunnel snapshot was not rendered");
   assert.equal(initial.tunnelState, "已连接");
+  await cdp.evaluate(`(() => {
+    window.__localOpsStableServiceRow = document.querySelector("#services-table tr");
+    window.__localOpsStableTunnelCard = document.querySelector("#tunnel-cards .tunnel-card");
+  })()`);
 
   snapshotFailure = true;
   await cdp.evaluate(`document.querySelector("#refresh-button").click()`);
@@ -138,27 +142,31 @@ try {
   domainFailure = true;
   revision += 1;
   await cdp.evaluate(`document.querySelector("#refresh-button").click()`);
-  await waitFor(() => cdp.evaluate(`document.querySelector("#tunnel-cards .status-pill")?.textContent.trim() === "连接失败"`));
+  await waitFor(() => cdp.evaluate(`document.querySelector("#tunnel-cards .status-pill")?.textContent.trim() === "入口未就绪"`));
   const failedAction = await cdp.evaluate(`(() => {
     const button = document.querySelector("#tunnel-cards .row-actions > .mini-button:first-child");
     return { action: button?.dataset.action || "", disabled: Boolean(button?.disabled) };
   })()`);
-  assert.deepEqual(failedAction, { action: "retry-tunnel", disabled: false });
+  assert.deepEqual(failedAction, { action: "stop", disabled: false });
   const actionStart = calls.length;
-  await cdp.evaluate(`document.querySelector("#tunnel-cards [data-action=retry-tunnel]").click()`);
+  await cdp.evaluate(`document.querySelector("#tunnel-cards [data-action=stop]").click()`);
   await waitFor(() => calls.slice(actionStart).some((item) => item.method === "POST"));
   const mutationPaths = calls.slice(actionStart).filter((item) => item.method === "POST").map((item) => item.path);
-  assert.deepEqual(mutationPaths, ["/api/tunnels/isolated-tunnel/recheck-entry"]);
-  assert.equal(mutationPaths.some((item) => item.includes("/api/processes/")), false, "domain retry restarted SSH");
+  assert.deepEqual(mutationPaths, ["/api/processes/isolated-tunnel/stop"]);
 
   domainFailure = false;
   revision += 1;
   await cdp.evaluate(`document.querySelector("#refresh-button").click()`);
   await waitFor(() => cdp.evaluate(`document.querySelector("#tunnel-cards .status-pill")?.textContent.trim() === "已连接"`));
+  const stableNodes = await cdp.evaluate(`(() => ({
+    service: window.__localOpsStableServiceRow === document.querySelector("#services-table tr"),
+    tunnel: window.__localOpsStableTunnelCard === document.querySelector("#tunnel-cards .tunnel-card")
+  }))()`);
+  assert.deepEqual(stableNodes, { service: true, tunnel: true }, "refresh replaced stable resource DOM nodes");
   assert.deepEqual(browserErrors, [], `browser exceptions detected:\n${browserErrors.join("\n")}`);
   assert.doesNotMatch(chromeStderr, /content security policy/i);
   cdp.close();
-  console.log("Isolated refresh acceptance passed: stale retention, disabled mutations, and domain-only retry");
+  console.log("Isolated refresh acceptance passed: stable DOM, stale retention, disabled mutations, and stoppable unready tunnels");
 } finally {
   if (server?.listening) await new Promise((resolve) => server.close(resolve));
   if (chrome && chrome.exitCode == null) {

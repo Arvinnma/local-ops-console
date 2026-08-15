@@ -321,7 +321,7 @@ svg { display: block; width: 1em; height: 1em; fill: currentColor; }
 .status-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status-pill.running, .status-pill.connected, .status-pill.online, .status-pill.healthy { color: #08724f; background: var(--green-soft); }
 .status-pill.connecting { color: #2858b8; background: var(--blue-soft); }
-.status-pill.waiting_network, .status-pill.retrying, .status-pill.restarting, .status-pill.degraded { color: var(--amber); background: var(--amber-soft); }
+.status-pill.waiting_network, .status-pill.retrying, .status-pill.restarting, .status-pill.degraded, .status-pill.service_unready, .status-pill.entry_unready { color: var(--amber); background: var(--amber-soft); }
 .status-pill.stopped, .status-pill.connection_failed, .status-pill.offline, .status-pill.unhealthy { color: var(--red); background: var(--red-soft); }
 .status-pill.disabled { color: var(--amber); background: var(--amber-soft); }
 .status-pill.unknown { color: var(--muted); }

@@ -1,15 +1,15 @@
 # 当前状态
 
-> 状态：权威源码、Foundation 文档和 m-wiki 注册已收敛；v1.8.6 已完成源码、制品与本机覆盖安装验收
+> 状态：权威源码正在准备 1.8.7 本机修复；公开 Release 与当前安装版仍为 v1.8.6
 
-状态日期：2026-08-14
+状态日期：2026-08-15
 
 ## 项目与版本基线
 
 | 项目 | 当前事实 |
 | --- | --- |
 | project_id | `local-ops-console` |
-| 软件源码版本 | `1.8.6` |
+| 软件源码版本 | `1.8.7`，尚未创建公开 Release，尚未覆盖当前安装版 |
 | 权威源码仓库 | `/Users/arvin/Documents/AI/codex/local-ops-console` |
 | 旧源码仓库 | `/Users/arvin/Documents/Codex/projects/local-ops/local-ops-console`，只读保留 |
 | 当前分支 | `main` |
@@ -17,7 +17,7 @@
 | 私有 Forgejo `forgejo/main` | 发布后与本地 `main` 一致；精确 SHA 以 `git ls-remote forgejo refs/heads/main` 为准 |
 | 公开 / 私有发布标签 | `v1.8.6`，两个远端必须解析到同一发布提交 |
 | GitHub Release | `v1.8.6`，Apple Silicon DMG SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` |
-| 当前安装 App | `/Applications/Local Ops.app`，App 与内置后台均已核验为 `1.8.6` |
+| 当前安装 App | `/Applications/Local Ops.app`，本轮覆盖前仍为已核验的 `1.8.6` |
 | m-wiki | `/Users/arvin/Documents/AI/m-wiki/项目/local-ops-console/` 已注册并解析到权威源码路径 |
 | 项目文档 | README、`docs/`、源码和测试共同构成当前事实；m-wiki 仅链接这些项目文件 |
 

@@ -3,6 +3,8 @@
 const MIN_UNPRIVILEGED_PORT = 1024;
 const MAX_PORT = 65535;
 const ANCHOR_PORT_TOKEN = "{{PROXY_PORT}}";
+const DAEMON_PROXY_PORT_TOKEN = "{{PROXY_PORT}}";
+const DAEMON_REQUEST_PATH_TOKEN = "{{REQUEST_PATH}}";
 
 function normalizeProxyPort(value) {
   const port = Number(value);
@@ -19,6 +21,40 @@ function renderPortlessAnchor(template, proxyPort) {
     throw new Error("无端口访问规则模板缺少端口占位符");
   }
   return source.replaceAll(ANCHOR_PORT_TOKEN, String(port));
+}
+
+function renderPortlessDaemon(template, { proxyPort, requestPath } = {}) {
+  const port = normalizeProxyPort(proxyPort);
+  const file = String(requestPath || "");
+  if (!file.startsWith("/")) throw new Error("无端口修复请求路径必须是绝对路径");
+  const source = String(template || "");
+  if (!source.includes(DAEMON_PROXY_PORT_TOKEN) || !source.includes(DAEMON_REQUEST_PATH_TOKEN)) {
+    throw new Error("无端口 LaunchDaemon 模板缺少必要占位符");
+  }
+  const escapedPath = file
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+  return source
+    .replaceAll(DAEMON_PROXY_PORT_TOKEN, String(port))
+    .replaceAll(DAEMON_REQUEST_PATH_TOKEN, escapedPath);
+}
+
+function portlessConfigurationMatches({
+  anchorTemplate,
+  daemonTemplate,
+  helperTemplate,
+  installedAnchor,
+  installedDaemon,
+  installedHelper,
+  proxyPort,
+  requestPath
+} = {}) {
+  return String(installedAnchor || "") === renderPortlessAnchor(anchorTemplate, proxyPort)
+    && String(installedDaemon || "") === renderPortlessDaemon(daemonTemplate, { proxyPort, requestPath })
+    && String(installedHelper || "") === String(helperTemplate || "");
 }
 
 function conflictingRuntimePort(settings, proxyPort) {
@@ -41,5 +77,7 @@ module.exports = {
   MIN_UNPRIVILEGED_PORT,
   conflictingRuntimePort,
   normalizeProxyPort,
-  renderPortlessAnchor
+  portlessConfigurationMatches,
+  renderPortlessAnchor,
+  renderPortlessDaemon
 };

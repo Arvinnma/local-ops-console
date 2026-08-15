@@ -7,9 +7,13 @@
   <key>ProgramArguments</key>
   <array>
     <string>/Library/PrivilegedHelperTools/com.arvin.localops.portless</string>
+    <string>{{REQUEST_PATH}}</string>
+    <string>{{PROXY_PORT}}</string>
   </array>
-  <key>RunAtLoad</key>
-  <true/>
+  <key>WatchPaths</key>
+  <array>
+    <string>{{REQUEST_PATH}}</string>
+  </array>
   <key>ProcessType</key>
   <string>Background</string>
   <key>StandardOutPath</key>

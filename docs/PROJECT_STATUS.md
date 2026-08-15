@@ -4,9 +4,9 @@
 
 This file is the project-owned source of truth for the currently installed build, public distribution baseline, private verified baseline, and release-readiness behavior. Update it after every release or verified post-release hotfix. Roadmap ideas and external knowledge bases are not authoritative for shipped state.
 
-Status date: **2026-08-14**
+Status date: **2026-08-15**
 
-Source update date: **2026-08-14**
+Source update date: **2026-08-15**
 
 ## English
 
@@ -14,7 +14,8 @@ Source update date: **2026-08-14**
 
 | Scope | Version / commit | Meaning |
 | --- | --- | --- |
-| Installed application / runtime | App and bundled backend `1.8.6` | `/Applications/Local Ops.app` and `/Users/arvin/.local/share/local-ops/.bundle-manifest.json`, verified after installing the release candidate |
+| Source workspace | `1.8.7` working tree | Portless PF recovery and degraded-tunnel presentation are under final delivery; no public `v1.8.7` Release exists |
+| Installed application / runtime | App and bundled backend `1.8.6` | `/Applications/Local Ops.app` and `/Users/arvin/.local/share/local-ops/.bundle-manifest.json`; the 1.8.7 source has not yet replaced it |
 | Public GitHub runtime baseline | Tag `v1.8.6` | Source baseline published with the `v1.8.6` release |
 | Public `v1.8.6` DMG | SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` | GitHub Release artifact, Apple Silicon only |
 | Public `v1.8.6` tag | `v1.8.6` | Immutable released source baseline; resolve the tag for the exact commit |
@@ -23,7 +24,7 @@ Source update date: **2026-08-14**
 
 Documentation-only commits may advance either `main`; the immutable `v1.8.6` tag remains the released runtime baseline.
 
-Version 1.8.6 ships the refresh-consistency work plus a per-tunnel consecutive-failure supervisor. Atomic catalog/state snapshots, serialized ordinary/forced refreshes, stale-snapshot protection, menu-bar health debounce, and a shared SSH action contract are now packaged and installed. Each tunnel gets ten consecutive attempts; listener readiness, optional HTTP readiness, and a ten-second stable window reset that tunnel's counter to zero so a later outage starts at one.
+Version 1.8.6 ships the refresh-consistency work plus a per-tunnel consecutive-failure supervisor. Atomic catalog/state snapshots, serialized ordinary/forced refreshes, stale-snapshot protection, menu-bar health debounce, and a shared SSH action contract are packaged and installed. The 1.8.7 source additionally adds bounded event-driven PF recovery and separates live SSH forwarding from unavailable application/domain readiness; it is not yet a public Release or installed baseline.
 
 ### Verified cold-start and SSH-readiness behavior
 
@@ -69,7 +70,8 @@ Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandat
 
 | 范围 | 版本 / 提交 | 含义 |
 | --- | --- | --- |
-| 当前安装 App / 运行副本 | App 与内置后台 `1.8.6` | `/Applications/Local Ops.app` 与 `/Users/arvin/.local/share/local-ops/.bundle-manifest.json`，已在安装候选包后核验 |
+| 权威源码工作区 | `1.8.7` 工作树 | 正在交付 PF 无端口自愈与隧道降级状态；尚未创建公开 `v1.8.7` Release |
+| 当前安装 App / 运行副本 | App 与内置后台 `1.8.6` | `/Applications/Local Ops.app` 与 `/Users/arvin/.local/share/local-ops/.bundle-manifest.json`；1.8.7 源码尚未覆盖安装 |
 | 公开 GitHub 运行代码基线 | 标签 `v1.8.6` | 随 `v1.8.6` Release 发布的源码基线 |
 | 公开 `v1.8.6` DMG | SHA-256 `726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40` | GitHub Release 制品，仅支持 Apple Silicon |
 | 公开 `v1.8.6` 标签 | `v1.8.6` | 不可变的已发布源码基线；精确提交以标签解析结果为准 |
@@ -78,7 +80,7 @@ Use [Release and Hotfix Regression Manual](RELEASE_REGRESSION.md) for the mandat
 
 后续纯文档提交可能继续推进任一 `main`；不可变的 `v1.8.6` 标签仍是已发布运行代码基线。
 
-v1.8.6 正式包含刷新一致性修复和逐隧道连续失败监督器：原子 catalog/state 快照、普通/强制刷新串行化、旧快照保护、菜单栏健康去抖和统一 SSH 动作契约均已打包并安装。每条隧道独立拥有 10 次连续失败额度；本地监听、可选 HTTP readiness 与 10 秒稳定窗口通过后，该隧道计数清零，后续新故障从 1 开始。
+v1.8.6 正式包含刷新一致性修复和逐隧道连续失败监督器：原子 catalog/state 快照、普通/强制刷新串行化、旧快照保护、菜单栏健康去抖和统一 SSH 动作契约均已打包并安装。1.8.7 源码进一步加入有预算的事件驱动 PF 自愈，并把 SSH 转发存活与应用/域名入口未就绪拆成可停止的降级状态；当前还不是公开 Release 或安装基线。
 
 ### 已验证的冷启动与 SSH readiness 行为
 

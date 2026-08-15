@@ -1,6 +1,6 @@
 {
   "name": "local-ops-desktop",
-  "version": "1.8.6",
+  "version": "1.8.7",
   "description": "Native macOS shell for the Local Ops control plane",
   "private": true,
   "main": "main.cjs",
@@ -29,7 +29,9 @@
       "main.cjs",
       "control-health.cjs",
       "portless-config.cjs",
+      "portless-recovery.cjs",
       "refresh-coordinator.cjs",
+      "tray-refresh-policy.cjs",
       "startup-mode.cjs",
       "tunnel-action.cjs",
       "window-lifecycle.cjs",
@@ -59,7 +61,7 @@
     },
     "afterPack": "scripts/after-pack.cjs",
     "mac": {
-      "bundleVersion": "1.8.6",
+      "bundleVersion": "1.8.7",
       "target": [
         {
           "target": "dmg",

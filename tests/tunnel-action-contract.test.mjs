@@ -21,12 +21,23 @@ const fixtures = [
   {
     name: "waiting network",
     process: { status: "waiting_network", active: true },
-    expected: ""
+    expected: "stop"
   },
   {
     name: "retrying",
     process: { status: "retrying", active: true },
-    expected: ""
+    expected: "stop"
+  },
+  {
+    name: "SSH connected while the remote service is unready",
+    process: {
+      status: "connecting",
+      active: true,
+      healthCheck: { ok: true },
+      readinessCheck: { configured: true, ok: false, error: "ECONNRESET" },
+      domainEntry: { configured: false }
+    },
+    expected: "stop"
   },
   {
     name: "terminal domain failure keeps SSH alive",
@@ -36,7 +47,7 @@ const fixtures = [
       healthCheck: { ok: true },
       domainEntry: { configured: true, ready: false, terminal: true }
     },
-    expected: "domain-recheck"
+    expected: "stop"
   },
   {
     name: "terminal SSH failure starts again",
@@ -48,13 +59,9 @@ const fixtures = [
 for (const fixture of fixtures) {
   test(`main UI and tray agree for ${fixture.name}`, () => {
     const displayState = tunnelDisplayState(fixture.process);
-    const browser = tunnelPrimaryAction(displayState);
+    const browser = tunnelPrimaryAction(displayState, { active: Boolean(fixture.process.active) });
     const tray = resolveTunnelOperation(fixture.process);
-    const browserOperation = browser.action === "retry-tunnel"
-      ? fixture.process.healthCheck?.ok && fixture.process.domainEntry?.configured && !fixture.process.domainEntry?.ready
-        ? "domain-recheck"
-        : fixture.process.active ? "restart" : "start"
-      : browser.action;
+    const browserOperation = browser.action === "retry-tunnel" ? "start" : browser.action;
 
     assert.equal(tray.displayState, displayState);
     assert.equal(tray.operation, fixture.expected);

@@ -4,6 +4,21 @@ All notable changes to Local Ops are documented here. Versions follow [Semantic 
 
 ## [Unreleased]
 
+### Added
+
+- Add event-driven recovery for macOS portless access. Local Ops now repairs the Apple PF main rules before requesting its child anchor only when the configured Caddy port is healthy, loopback port 80 is unavailable, and the installed helper configuration is synchronized.
+- Add persistent single-flight, cooldown, and bounded-attempt guards around privileged PF recovery so repeated UI refreshes or App restarts cannot cause a `pfctl` reload loop.
+
+### Fixed
+
+- Keep menu-bar controls actionable while a background snapshot refresh is in progress; only genuinely stale or offline snapshots disable state-changing actions.
+- Present a tunnel with a live SSH forward but unavailable application or domain entry as **Service Not Ready** or **Entry Not Ready**, while retaining an explicit Stop action instead of leaving it indefinitely in a disabled **Connecting** state.
+- Require an explicit repair request before the privileged portless helper changes PF state, remove one-shot `RunAtLoad` behavior, and reject the enable action when port 80 was not actually restored.
+
+### Testing
+
+- Add PF synchronization, recovery-budget, helper-request, tray-refresh-policy, and tunnel degraded-state regression coverage.
+
 ## [1.8.6] - 2026-08-14
 
 ### Added

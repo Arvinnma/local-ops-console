@@ -64,3 +64,10 @@ LOCAL_OPS_KEYCHAIN_HELPER=/tmp/local-ops-keychain-test npm run test:keychain
 - `npm run test:browser`：CSP、图标、操作菜单、SSH 四态动作、连续失败诊断字段与窄窗口横向滚动通过。
 - DMG SHA-256：`726e1f52c1ff8da1ac334d187b69ffc335396e8240404ed6136190c08979fe40`；`hdiutil verify`、ad-hoc 签名、arm64 架构和挂载布局通过。
 - 覆盖安装后 App 与运行后台均为 `1.8.6`，关键源码 SHA 一致；安装会重启控制面和既有 SSH Worker，因此已在无活动 Restic/传输任务时执行并保存旧 App 回滚副本。
+
+## 2026-08-15 v1.8.7 源码门禁
+
+- PF 定向回归覆盖 Apple 主规则→显式 request→Local Ops 子 anchor 顺序、配置同步、外部端口 80 占用拒绝、单飞、冷却、持久预算和失败提示语义。
+- 托盘回归覆盖普通后台刷新期间继续使用最后成功快照，只有真正 stale/offline 时禁用写操作。
+- SSH 展示回归覆盖转发已建立但应用或域名入口未就绪时显示独立降级状态，并保留可用的停止操作。
+- 本节仅记录源码和隔离测试目标；DMG、安装版与真实 PF 运行验收结果必须在实际执行后补录，不能预先视为通过。
